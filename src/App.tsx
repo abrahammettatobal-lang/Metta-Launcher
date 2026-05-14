@@ -35,7 +35,8 @@ import {
 import { deleteMod, listMods, modFolderDisk, setModEnabled } from "./services/modsService";
 import type { ModEntry } from "./services/modsService";
 import { tap } from "./utils/tap";
-import { subscribeLaunchProgress, type LaunchProgress } from "./services/launchProgress";
+import { subscribeLaunchProgress, abortLaunch, type LaunchProgress } from "./services/launchProgress";
+import { fetchSkinData, applySkinAsResourcePack } from "./services/minecraft/skinManager";
 
 function cx(...xs: Array<string | false | undefined>) {
   return xs.filter(Boolean).join(" ");
@@ -126,6 +127,9 @@ function Dashboard() {
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<LaunchProgress | null>(null);
 
+  const [skinUsername, setSkinUsername] = useState("");
+  const [isApplyingSkin, setIsApplyingSkin] = useState(false);
+
   const load = useCallback(async () => {
     const [i, a] = await Promise.all([instancesList(), accountsList()]);
     setInstances(i);
@@ -198,24 +202,35 @@ function Dashboard() {
           <p className="page-desc">Elige instancia, revisa la cuenta activa y lanza el juego.</p>
         </div>
         <div className="flex flex-col items-end gap-3">
-          <button
-            type="button"
-            disabled={busy || !cur || !activeAcc}
-            onClick={() =>
-              tap("Jugar", async () => {
-                if (!cur) return;
-                setBusy(true);
-                try {
-                  await launchInstance(cur.id);
-                } finally {
-                  setBusy(false);
-                }
-              })
-            }
-            className="ui-btn-play"
-          >
-            Jugar
-          </button>
+          <div className="flex gap-2">
+            {busy && progress && progress.phase !== "idle" && progress.phase !== "running" && progress.phase !== "done" && progress.phase !== "error" && (
+              <button
+                type="button"
+                onClick={() => tap("Cancelar", async () => abortLaunch())}
+                className="ui-btn-play !bg-red-500 hover:!bg-red-600 focus:!ring-red-400"
+              >
+                Cancelar
+              </button>
+            )}
+            <button
+              type="button"
+              disabled={busy || !cur || !activeAcc}
+              onClick={() =>
+                tap("Jugar", async () => {
+                  if (!cur) return;
+                  setBusy(true);
+                  try {
+                    await launchInstance(cur.id);
+                  } finally {
+                    setBusy(false);
+                  }
+                })
+              }
+              className="ui-btn-play"
+            >
+              Jugar
+            </button>
+          </div>
           
           {progress && progress.phase !== "idle" && (
             <div className="w-full max-w-xs mt-2">
@@ -328,6 +343,52 @@ function Dashboard() {
           ) : (
             <p className="text-sm text-ink-muted">Añade una cuenta Microsoft o local.</p>
           )}
+
+          <h2 className="ui-section-title mt-8">Personalizar Skin</h2>
+          <div className="flex flex-col gap-3">
+            <p className="text-xs text-ink-muted">Busca el nombre de un jugador Premium y aplícalo a esta instancia.</p>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                className="ui-input flex-1"
+                placeholder="Ej. Notch, Dream, Rubius..."
+                value={skinUsername}
+                onChange={(e) => setSkinUsername(e.target.value)}
+              />
+              <button
+                type="button"
+                className="ui-btn"
+                disabled={isApplyingSkin || !skinUsername || !cur}
+                onClick={() => tap("Aplicar Skin", async () => {
+                  if (!cur) return;
+                  setIsApplyingSkin(true);
+                  try {
+                    const data = await fetchSkinData(skinUsername);
+                    await applySkinAsResourcePack(cur.instancePath, data);
+                    alert(`Skin de ${skinUsername} aplicada con éxito. Asegúrate de activarla en Opciones -> Paquetes de Recursos si no se cargó automáticamente.`);
+                  } catch (e: any) {
+                    alert(`Error al aplicar skin: ${e.message}`);
+                  } finally {
+                    setIsApplyingSkin(false);
+                  }
+                })}
+              >
+                {isApplyingSkin ? "Aplicando..." : "Aplicar"}
+              </button>
+            </div>
+            {skinUsername && (
+              <div className="flex items-center gap-3 mt-1 bg-surface-deep p-2 rounded-md border border-line">
+                <img 
+                  src={`https://minotar.net/helm/${skinUsername}/64.png`} 
+                  alt="Skin Preview" 
+                  className="w-10 h-10 rounded shadow-md"
+                  onError={(e) => { e.currentTarget.src = "https://minotar.net/helm/steve/64.png" }}
+                />
+                <span className="text-sm text-ink-faint font-medium">Previsualización de {skinUsername}</span>
+              </div>
+            )}
+          </div>
+
           <h2 className="ui-section-title mt-8">Descargas</h2>
           <p className="truncate font-mono text-xs text-ink-faint">{dl || "Sin actividad"}</p>
           <h2 className="ui-section-title mt-6">Registro launcher</h2>

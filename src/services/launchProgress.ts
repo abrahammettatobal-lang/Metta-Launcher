@@ -29,6 +29,19 @@ type ProgressListener = (p: LaunchProgress) => void;
 const listeners = new Set<ProgressListener>();
 
 let _current: LaunchProgress = { phase: "idle", label: "", percent: null };
+let _abortFlag = false;
+
+export function abortLaunch(): void {
+  _abortFlag = true;
+}
+
+export function isLaunchAborted(): boolean {
+  return _abortFlag;
+}
+
+export function resetAbortFlag(): void {
+  _abortFlag = false;
+}
 
 export function subscribeLaunchProgress(cb: ProgressListener): () => void {
   listeners.add(cb);

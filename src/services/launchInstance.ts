@@ -32,6 +32,8 @@ import {
   progressStarting,
   progressRunning,
   resetLaunchProgress,
+  isLaunchAborted,
+  resetAbortFlag,
 } from "./launchProgress";
 
 export { listForgeVersions } from "./minecraft/forgeInstaller";
@@ -59,6 +61,14 @@ function parseGameExtra(s: string): string[] {
 
 export async function launchInstance(instanceId: string): Promise<void> {
   resetLaunchProgress();
+  resetAbortFlag();
+
+  const checkAbort = () => {
+    if (isLaunchAborted()) {
+      progressPreparing("Lanzamiento cancelado");
+      throw new Error("Lanzamiento cancelado por el usuario");
+    }
+  };
 
   const paths = await appPaths();
   const root = paths.launcherRoot;
@@ -81,6 +91,7 @@ export async function launchInstance(instanceId: string): Promise<void> {
   await mkdirAllCmd(`${inst.instancePath}/shaderpacks`);
 
   // ─── Java ───────────────────────────────────────────────────────────────────
+  checkAbort();
   progressJava("Buscando Java instalado…");
   const { javaPath } = await ensureJava(inst.javaPath, async (msg) => {
     progressJava(msg);
@@ -89,6 +100,7 @@ export async function launchInstance(instanceId: string): Promise<void> {
   await logAppend("launcher", "info", `[Java] Using: ${javaPath}`, instanceId);
 
   // ─── Installation ────────────────────────────────────────────────────────────
+  checkAbort();
   let merged: McVersionJson;
 
   if (inst.loaderType === "vanilla") {
@@ -138,6 +150,7 @@ export async function launchInstance(instanceId: string): Promise<void> {
   }
 
   // ─── Classpath ───────────────────────────────────────────────────────────────
+  checkAbort();
   const cpSep = os === "windows" ? ";" : ":";
   const seen = new Set<string>();
   const cpParts: string[] = [];
@@ -195,6 +208,7 @@ export async function launchInstance(instanceId: string): Promise<void> {
     Number(inst.maxRamMb),
   );
 
+  checkAbort();
   progressStarting(`Iniciando Java en ${javaPath}…`);
   await logAppend("launcher", "info", `Starting Java: ${javaPath}`, instanceId);
   await spawnJavaGame({
