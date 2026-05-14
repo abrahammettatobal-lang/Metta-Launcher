@@ -9,20 +9,30 @@ import {
   accountsList,
 } from "./bridge";
 import type { InstanceRow } from "./bridge";
-import { installFabric } from "./minecraft/fabricInstaller";
+import { installFabricSide } from "./minecraft/fabricInstaller";
 import { installForgeSide } from "./minecraft/forgeInstaller";
 import { installNeoForgeSide } from "./minecraft/neoforgeInstaller";
 import { buildLaunchCommand, type LaunchReplacements } from "./minecraft/launchCommandService";
 import {
   libraryArtifactRef,
+  mergeInheritedVersionJson,
   type McVersionJson,
-  type LibraryEntry,
 } from "./minecraft/libraryService";
 import { detectMcOs } from "./minecraft/os";
 import { installVanillaSide } from "./minecraft/vanillaInstaller";
 import { uuidWithHyphens } from "./minecraft/uuidFmt";
-
-import { mergeInheritedVersionJson } from "./minecraft/libraryService";
+import { ensureJava } from "./minecraft/javaManager";
+import {
+  progressPreparing,
+  progressJava,
+  progressLibraries,
+  progressAssets,
+  progressNatives,
+  progressLoader,
+  progressStarting,
+  progressRunning,
+  resetLaunchProgress,
+} from "./launchProgress";
 
 export { listForgeVersions } from "./minecraft/forgeInstaller";
 export { listNeoForgeVersions } from "./minecraft/neoforgeInstaller";
@@ -48,6 +58,8 @@ function parseGameExtra(s: string): string[] {
 }
 
 export async function launchInstance(instanceId: string): Promise<void> {
+  resetLaunchProgress();
+
   const paths = await appPaths();
   const root = paths.launcherRoot;
   const list = await instancesList();
@@ -59,6 +71,8 @@ export async function launchInstance(instanceId: string): Promise<void> {
 
   const os = detectMcOs();
   const nativesRel = `${inst.instancePath}/natives`.replace(/\\/g, "/");
+
+  progressPreparing("Creando carpetas de instancia…");
   await mkdirAllCmd(inst.instancePath);
   await mkdirAllCmd(`${inst.instancePath}/mods`);
   await mkdirAllCmd(`${inst.instancePath}/config`);
@@ -66,115 +80,78 @@ export async function launchInstance(instanceId: string): Promise<void> {
   await mkdirAllCmd(`${inst.instancePath}/resourcepacks`);
   await mkdirAllCmd(`${inst.instancePath}/shaderpacks`);
 
+  // ─── Java ───────────────────────────────────────────────────────────────────
+  progressJava("Buscando Java instalado…");
+  const { javaPath } = await ensureJava(inst.javaPath, async (msg) => {
+    progressJava(msg);
+    await logAppend("launcher", "info", msg, instanceId);
+  });
+  await logAppend("launcher", "info", `[Java] Using: ${javaPath}`, instanceId);
+
+  // ─── Installation ────────────────────────────────────────────────────────────
   let merged: McVersionJson;
-  // Track which version ID to use for the client.jar path
-  // For Fabric, the client.jar is always from the vanilla version, not the fabric version
-  let vanillaVersionId = inst.minecraftVersion;
-  // Track the actual version id that was launched (for logging)
-  let launchedVersionId = inst.minecraftVersion;
 
   if (inst.loaderType === "vanilla") {
-    await logAppend("launcher", "info", `[VanillaInstaller] Installing Minecraft ${inst.minecraftVersion}`, instanceId);
+    progressLibraries("Vanilla: instalando librerías…");
     merged = await installVanillaSide(inst.minecraftVersion, os, nativesRel, async (m) => {
-      await logAppend("launcher", "info", m, instanceId);
-    });
-    vanillaVersionId = inst.minecraftVersion;
-    launchedVersionId = inst.minecraftVersion;
-
-  } else if (inst.loaderType === "fabric") {
-    await logAppend(
-      "launcher",
-      "info",
-      `[FabricInstaller] Installing Fabric ${inst.loaderVersion || "latest"} for Minecraft ${inst.minecraftVersion}`,
-      instanceId
-    );
-
-    // Install vanilla side first (downloads client.jar, assets, native libraries)
-    await logAppend("launcher", "info", `[VanillaInstaller] Installing vanilla side for ${inst.minecraftVersion}`, instanceId);
-    await installVanillaSide(inst.minecraftVersion, os, nativesRel, async (m) => {
-      await logAppend("launcher", "info", m, instanceId);
-    });
-
-    // Install Fabric (validates, downloads profile, resolves inheritance)
-    const { fabricVersionId, resolved } = await installFabric(
-      inst.minecraftVersion,
-      inst.loaderVersion || undefined,
-      async (m) => {
-        await logAppend("launcher", "info", m, instanceId);
+      if (m.startsWith("assets ")) {
+        const [, rest] = m.split(" ");
+        const [d, t] = rest.split("/");
+        progressAssets(Number(d), Number(t));
+      } else if (m.includes("native")) {
+        progressNatives(m);
+      } else if (m.includes("librar")) {
+        progressLibraries(m);
       }
-    );
-
-    // Convert ResolvedMinecraftVersion to McVersionJson shape
-    merged = {
-      id: resolved.id,
-      type: resolved.type,
-      mainClass: resolved.mainClass ?? "",
-      minecraftArguments: resolved.minecraftArguments,
-      arguments: resolved.arguments as McVersionJson["arguments"],
-      libraries: (resolved.libraries ?? []) as LibraryEntry[],
-      assetIndex: resolved.assetIndex,
-      assets: resolved.assets,
-      downloads: resolved.downloads,
-      javaVersion: resolved.javaVersion,
-      logging: resolved.logging,
-    };
-
-    vanillaVersionId = inst.minecraftVersion;
-    launchedVersionId = fabricVersionId;
-    await logAppend("launcher", "info", `[FabricInstaller] Using version ID: ${fabricVersionId}`, instanceId);
-
+      await logAppend("launcher", "info", m, instanceId);
+    });
+  } else if (inst.loaderType === "fabric") {
+    progressLibraries("Vanilla: instalando librerías base…");
+    await installVanillaSide(inst.minecraftVersion, os, nativesRel, async (m) => {
+      if (m.startsWith("assets ")) {
+        const [, rest] = m.split(" ");
+        const [d, t] = rest.split("/");
+        progressAssets(Number(d), Number(t));
+      } else if (m.includes("native")) {
+        progressNatives(m);
+      } else if (m.includes("librar")) {
+        progressLibraries(m);
+      }
+      await logAppend("launcher", "info", m, instanceId);
+    });
+    progressLoader(`Fabric: instalando loader ${inst.loaderVersion}…`);
+    merged = await installFabricSide(inst.minecraftVersion, inst.loaderVersion);
   } else if (inst.loaderType === "forge") {
-    const java = inst.javaPath || (await settingGet("javaPath")) || "java";
+    progressLibraries("Vanilla: instalando librerías base…");
     await installVanillaSide(inst.minecraftVersion, os, nativesRel, async () => undefined);
-    const forgeMerged = await installForgeSide(java, root, inst.minecraftVersion, inst.loaderVersion);
-    merged = await mergeInheritedVersionJson(forgeMerged);
-    vanillaVersionId = inst.minecraftVersion;
-    launchedVersionId = merged.id;
-
+    progressLoader(`Forge: instalando loader ${inst.loaderVersion}…`);
+    merged = await installForgeSide(javaPath, root, inst.minecraftVersion, inst.loaderVersion);
+    merged = await mergeInheritedVersionJson(merged);
   } else if (inst.loaderType === "neoforge") {
-    const java = inst.javaPath || (await settingGet("javaPath")) || "java";
+    progressLibraries("Vanilla: instalando librerías base…");
     await installVanillaSide(inst.minecraftVersion, os, nativesRel, async () => undefined);
-    const neoforgeMerged = await installNeoForgeSide(java, root, inst.loaderVersion);
-    merged = await mergeInheritedVersionJson(neoforgeMerged);
-    vanillaVersionId = inst.minecraftVersion;
-    launchedVersionId = merged.id;
-
+    progressLoader(`NeoForge: instalando loader ${inst.loaderVersion}…`);
+    merged = await installNeoForgeSide(javaPath, root, inst.loaderVersion);
+    merged = await mergeInheritedVersionJson(merged);
   } else {
     throw new Error("Unknown loader");
   }
 
-  // ─── Build classpath ────────────────────────────────────────────────────────
+  // ─── Classpath ───────────────────────────────────────────────────────────────
   const cpSep = os === "windows" ? ";" : ":";
-  const cpParts: string[] = [];
   const seen = new Set<string>();
-
-  // Add all merged libraries (Fabric + Vanilla combined, deduped)
-  for (const lib of merged.libraries ?? []) {
-    const a = libraryArtifactRef(lib as LibraryEntry, os);
+  const cpParts: string[] = [];
+  for (const lib of merged.libraries) {
+    const a = libraryArtifactRef(lib, os);
     if (!a) continue;
-    const absPath = abs(root, `shared/libraries/${a.relPath}`);
-    if (seen.has(absPath)) continue;
-    seen.add(absPath);
-    cpParts.push(absPath);
+    const p = abs(root, `shared/libraries/${a.relPath}`);
+    if (seen.has(p)) continue;
+    seen.add(p);
+    cpParts.push(p);
   }
-
-  // Add vanilla client.jar (always from the vanilla version, not Fabric)
-  const clientJar = abs(root, `shared/versions/${vanillaVersionId}/${vanillaVersionId}.jar`);
-  if (!seen.has(clientJar)) {
-    seen.add(clientJar);
-    cpParts.push(clientJar);
-  }
-
+  cpParts.push(abs(root, `shared/versions/${inst.minecraftVersion}/${inst.minecraftVersion}.jar`));
   const classpath = cpParts.join(cpSep);
 
-  await logAppend(
-    "launcher",
-    "info",
-    `[LaunchCommand] Classpath has ${cpParts.length} entries`,
-    instanceId
-  );
-
-  // ─── Build session and replacements ─────────────────────────────────────────
   const session = await getLaunchSession(active.id);
   const uuid = uuidWithHyphens(session.uuid);
   const versionType = merged.type ?? "release";
@@ -186,7 +163,7 @@ export async function launchInstance(instanceId: string): Promise<void> {
     auth_xuid: "",
     version_type: versionType,
     user_type: session.userType,
-    version_name: launchedVersionId,
+    version_name: merged.id,
     game_directory: abs(root, inst.instancePath),
     assets_root: abs(root, "shared/assets"),
     assets_index_name: merged.assetIndex?.id ?? "legacy",
@@ -195,7 +172,7 @@ export async function launchInstance(instanceId: string): Promise<void> {
     classpath,
     library_directory: abs(root, "shared/libraries"),
     natives_directory: abs(root, nativesRel),
-    primary_jar: clientJar,
+    primary_jar: abs(root, `shared/versions/${inst.minecraftVersion}/${inst.minecraftVersion}.jar`),
     clientid: "metta",
   };
 
@@ -208,15 +185,6 @@ export async function launchInstance(instanceId: string): Promise<void> {
     extraGame.push("--width", w.trim(), "--height", h.trim());
   }
 
-  const javaPath = inst.javaPath || (await settingGet("javaPath")) || "java";
-
-  await logAppend(
-    "launcher",
-    "info",
-    `[LaunchCommand] Building launch command for ${launchedVersionId} with mainClass: ${merged.mainClass}`,
-    instanceId
-  );
-
   const argv = buildLaunchCommand(
     merged,
     os,
@@ -227,20 +195,15 @@ export async function launchInstance(instanceId: string): Promise<void> {
     Number(inst.maxRamMb),
   );
 
-  await logAppend("launcher", "info", `[LaunchCommand] Starting Java: ${javaPath}`, instanceId);
-  await logAppend(
-    "launcher",
-    "info",
-    `[LaunchCommand] Args[0..4]: ${argv.slice(0, 4).join(" ")}`,
-    instanceId
-  );
-
+  progressStarting(`Iniciando Java en ${javaPath}…`);
+  await logAppend("launcher", "info", `Starting Java: ${javaPath}`, instanceId);
   await spawnJavaGame({
     javaPath,
     cwd: rep.game_directory,
     args: argv,
     env: [["METTA_LAUNCHER", "1"]],
   });
+  progressRunning();
 }
 
 export async function prepareNewInstancePaths(

@@ -39,7 +39,7 @@ body {
   }
 
   .ui-rail {
-    @apply flex w-[15rem] shrink-0 flex-col border-r border-line bg-surface-deep/80 backdrop-blur-xl py-8 pl-6 pr-4 transition-all duration-300;
+    @apply flex w-[14rem] shrink-0 flex-col border-r border-line bg-surface-deep/95 py-8 pl-5 pr-3;
   }
 
   .ui-rail-brand {
@@ -47,101 +47,91 @@ body {
   }
 
   .ui-rail-mark {
-    @apply font-display text-2xl font-semibold tracking-tight text-ink drop-shadow-sm;
+    @apply font-display text-xl font-semibold tracking-tight text-ink;
   }
 
   .ui-rail-tag {
-    @apply mt-0.5 text-[11px] font-medium uppercase tracking-[0.22em] text-accent-bright/80;
+    @apply mt-0.5 text-[11px] font-medium uppercase tracking-[0.2em] text-ink-faint;
   }
 
   .ui-nav {
-    @apply flex flex-1 flex-col gap-1;
+    @apply flex flex-1 flex-col gap-0.5;
   }
 
   .ui-nav-link {
-    @apply relative overflow-hidden rounded-md px-3 py-2.5 text-[13px] font-medium text-ink-muted transition-all duration-200 hover:bg-surface-raised hover:text-ink hover:shadow-sm;
+    @apply rounded-md px-3 py-2.5 text-[13px] font-medium text-ink-muted transition-colors hover:bg-surface-raised/80 hover:text-ink;
   }
 
   .ui-nav-link-active {
-    @apply bg-surface-card text-ink shadow-nav ring-1 ring-white/5;
+    @apply bg-surface-card text-ink shadow-nav;
   }
 
   .ui-stage {
-    @apply flex min-h-0 min-w-0 flex-1 flex-col bg-surface/50 backdrop-blur-3xl relative;
-  }
-
-  .ui-stage::before {
-    content: "";
-    @apply absolute inset-0 pointer-events-none bg-gradient-to-br from-white/[0.02] to-transparent;
+    @apply flex min-h-0 min-w-0 flex-1 flex-col bg-surface/80;
   }
 
   .ui-stage-inner {
-    @apply scrollbar-thin min-h-0 flex-1 overflow-y-auto px-6 py-8 lg:px-12 lg:py-10 relative z-10;
+    @apply scrollbar-thin min-h-0 flex-1 overflow-y-auto px-6 py-8 lg:px-10 lg:py-10;
   }
 
   .ui-card {
-    @apply rounded-xl border border-line bg-surface-card/80 backdrop-blur-md p-6 shadow-card transition-all duration-300 hover:border-line-strong hover:bg-surface-card/95 hover:shadow-lift;
+    @apply rounded-lg border border-line bg-surface-card/95 p-5 shadow-card;
   }
 
   .ui-card-soft {
-    @apply rounded-xl border border-line/50 bg-surface-raised/40 backdrop-blur-sm p-5;
+    @apply rounded-lg border border-line/80 bg-surface-raised/60 p-4;
   }
 
   .page-head {
-    @apply mb-10 flex flex-wrap items-end justify-between gap-4 border-b border-line pb-8;
+    @apply mb-8 flex flex-wrap items-end justify-between gap-4 border-b border-line pb-6;
   }
 
   .page-title {
-    @apply font-display text-4xl font-semibold tracking-tight text-ink drop-shadow-sm;
+    @apply font-display text-3xl font-semibold tracking-tight text-ink;
   }
 
   .page-desc {
-    @apply mt-2 max-w-xl text-[15px] leading-relaxed text-ink-muted;
+    @apply mt-1 max-w-xl text-sm leading-relaxed text-ink-muted;
   }
 
   .ui-field-label {
-    @apply mb-2 block text-[11px] font-medium uppercase tracking-wider text-ink-faint;
+    @apply mb-1.5 block text-xs font-medium uppercase tracking-wider text-ink-faint;
   }
 
   .ui-input {
-    @apply w-full rounded-md border border-line bg-surface-deep px-4 py-2.5 text-sm text-ink placeholder:text-ink-faint/60 transition-all focus:border-accent-dim focus:bg-surface-raised focus:outline-none focus:ring-2 focus:ring-accent-glow;
+    @apply w-full rounded-md border border-line bg-surface-deep px-3 py-2 text-sm text-ink placeholder:text-ink-faint/80 focus:border-accent-dim/50 focus:outline-none focus:ring-1 focus:ring-accent-glow;
   }
 
   .ui-btn {
-    @apply rounded-md border border-line bg-surface-raised px-4 py-2 text-sm font-medium text-ink transition-all hover:border-line-strong hover:bg-surface-card hover:shadow-sm active:scale-95;
+    @apply rounded-md border border-line bg-surface-raised px-3 py-2 text-sm font-medium text-ink transition hover:border-line-strong hover:bg-surface-card;
   }
 
   .ui-btn-sm {
-    @apply rounded-md border border-line bg-surface-raised px-3 py-1.5 text-xs font-medium text-ink-muted transition-all hover:border-line-strong hover:text-ink hover:shadow-sm active:scale-95;
+    @apply rounded-md border border-line bg-surface-raised px-3 py-1.5 text-xs font-medium text-ink-muted transition hover:border-line-strong hover:text-ink;
   }
 
   .ui-btn-primary {
-    @apply relative overflow-hidden rounded-md border border-accent-dim/60 bg-gradient-to-b from-accent-bright/95 to-accent/90 px-6 py-3 text-sm font-semibold text-surface-deep shadow-lift transition-all hover:from-accent hover:to-accent-bright hover:shadow-[0_0_20px_rgba(201,162,39,0.3)] active:scale-95 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:shadow-none disabled:active:scale-100;
-  }
-
-  .ui-btn-primary::after {
-    content: '';
-    @apply absolute inset-0 bg-gradient-to-t from-black/10 to-transparent opacity-0 transition-opacity hover:opacity-100;
+    @apply rounded-md border border-accent-dim/50 bg-gradient-to-b from-accent-bright/95 to-accent/90 px-6 py-3 text-sm font-semibold text-surface-deep shadow-lift transition hover:from-accent hover:to-accent-bright/95 disabled:cursor-not-allowed disabled:opacity-40;
   }
 
   .ui-btn-play {
-    @apply relative overflow-hidden rounded-lg border border-accent-dim/50 bg-gradient-to-br from-accent-bright to-accent px-12 py-4 text-lg font-bold tracking-wide text-surface-deep shadow-[0_8px_30px_rgba(201,162,39,0.25)] transition-all hover:-translate-y-0.5 hover:brightness-110 hover:shadow-[0_12px_40px_rgba(201,162,39,0.35)] active:translate-y-0 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:transform-none disabled:hover:shadow-none;
+    @apply rounded-md border border-accent-dim/40 bg-gradient-to-br from-accent-bright to-accent px-10 py-3.5 text-base font-semibold text-surface-deep shadow-lift transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-40;
   }
 
   .ui-btn-danger {
-    @apply rounded-md border border-red-900/40 bg-red-950/30 px-3 py-1.5 text-xs font-medium text-red-200/80 transition-all hover:bg-red-900/40 hover:text-red-100 hover:shadow-sm active:scale-95;
+    @apply rounded-md border border-red-900/45 bg-red-950/35 px-3 py-1.5 text-xs font-medium text-red-200/90 transition hover:bg-red-950/55;
   }
 
   .ui-kbd {
-    @apply rounded bg-surface-deep/80 border border-line px-1.5 py-0.5 font-mono text-[11px] text-ink-muted shadow-inner;
+    @apply rounded bg-surface-deep px-1.5 py-0.5 font-mono text-[11px] text-ink-muted;
   }
 
   .ui-log {
-    @apply max-h-[250px] overflow-auto rounded-lg border border-line bg-[#040403] p-4 font-mono text-[11px] leading-relaxed text-ink-muted shadow-inner;
+    @apply max-h-40 overflow-auto rounded-md border border-line bg-surface-deep/90 p-3 font-mono text-xs leading-relaxed text-ink-muted;
   }
 
   .ui-table-wrap {
-    @apply overflow-hidden rounded-xl border border-line bg-surface-card/40 backdrop-blur-sm;
+    @apply overflow-hidden rounded-lg border border-line;
   }
 
   .ui-table {
@@ -149,28 +139,23 @@ body {
   }
 
   .ui-table thead {
-    @apply border-b border-line bg-surface-deep/50 text-[11px] uppercase tracking-wider text-ink-faint;
+    @apply border-b border-line bg-surface-deep/80 text-xs uppercase tracking-wider text-ink-faint;
   }
 
   .ui-table th {
-    @apply p-4 font-medium;
+    @apply p-3 font-medium;
   }
 
   .ui-table tbody tr {
-    @apply border-t border-line/50 transition-colors hover:bg-surface-raised/30;
+    @apply border-t border-line/70;
   }
 
   .ui-table td {
-    @apply p-4;
+    @apply p-3;
   }
 
   .ui-section-title {
-    @apply mb-4 flex items-center gap-3 text-xs font-semibold uppercase tracking-[0.2em] text-ink-faint;
-  }
-
-  .ui-section-title::after {
-    content: "";
-    @apply h-px flex-1 bg-gradient-to-r from-line to-transparent;
+    @apply mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-ink-faint;
   }
 }
 

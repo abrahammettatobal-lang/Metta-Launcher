@@ -35,6 +35,7 @@ import {
 import { deleteMod, listMods, modFolderDisk, setModEnabled } from "./services/modsService";
 import type { ModEntry } from "./services/modsService";
 import { tap } from "./utils/tap";
+import { subscribeLaunchProgress, type LaunchProgress } from "./services/launchProgress";
 
 function cx(...xs: Array<string | false | undefined>) {
   return xs.filter(Boolean).join(" ");
@@ -62,7 +63,6 @@ function Shell({ children }: { children: React.ReactNode }) {
     <div className="ui-shell text-ink">
       <aside className="ui-rail">
         <div className="ui-rail-brand">
-          <img src="/logo.png" alt="Metta" className="h-10 w-auto mb-3 opacity-90 drop-shadow-md" />
           <div className="ui-rail-mark">Metta</div>
           <div className="ui-rail-tag">Launcher</div>
         </div>
@@ -124,6 +124,7 @@ function Dashboard() {
   const [dl, setDl] = useState<string>("");
   const [logTail, setLogTail] = useState<string>("");
   const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState<LaunchProgress | null>(null);
 
   const load = useCallback(async () => {
     const [i, a] = await Promise.all([instancesList(), accountsList()]);
@@ -149,7 +150,16 @@ function Dashboard() {
     }).then((fn) => {
       u = fn;
     });
-    return () => u?.();
+    const unsubProgress = subscribeLaunchProgress((p) => {
+      setProgress(p);
+      if (p.phase === "done" || p.phase === "error" || p.phase === "idle") {
+        setTimeout(() => setProgress(null), 3000);
+      }
+    });
+    return () => {
+      u?.();
+      unsubProgress();
+    };
   }, []);
 
   useEffect(() => {
@@ -187,24 +197,47 @@ function Dashboard() {
           <h1 className="page-title">Inicio</h1>
           <p className="page-desc">Elige instancia, revisa la cuenta activa y lanza el juego.</p>
         </div>
-        <button
-          type="button"
-          disabled={busy || !cur || !activeAcc}
-          onClick={() =>
-            tap("Jugar", async () => {
-              if (!cur) return;
-              setBusy(true);
-              try {
-                await launchInstance(cur.id);
-              } finally {
-                setBusy(false);
-              }
-            })
-          }
-          className="ui-btn-play"
-        >
-          Jugar
-        </button>
+        <div className="flex flex-col items-end gap-3">
+          <button
+            type="button"
+            disabled={busy || !cur || !activeAcc}
+            onClick={() =>
+              tap("Jugar", async () => {
+                if (!cur) return;
+                setBusy(true);
+                try {
+                  await launchInstance(cur.id);
+                } finally {
+                  setBusy(false);
+                }
+              })
+            }
+            className="ui-btn-play"
+          >
+            Jugar
+          </button>
+          
+          {progress && progress.phase !== "idle" && (
+            <div className="w-full max-w-xs mt-2">
+              <div className="flex justify-between text-[11px] font-medium text-ink-muted mb-1">
+                <span>{progress.label}</span>
+                {progress.percent !== null && <span>{progress.percent}%</span>}
+              </div>
+              <div className="h-1.5 w-full bg-surface-deep overflow-hidden rounded-full border border-line">
+                <div 
+                  className={cx(
+                    "h-full bg-accent-bright transition-all duration-300 ease-out",
+                    progress.percent === null && "w-1/2 animate-pulse"
+                  )}
+                  style={{ width: progress.percent !== null ? `${progress.percent}%` : undefined }}
+                />
+              </div>
+              {progress.detail && (
+                <p className="mt-1 text-[10px] text-ink-faint truncate">{progress.detail}</p>
+              )}
+            </div>
+          )}
+        </div>
       </header>
 
       <div className="grid gap-5 lg:grid-cols-2">
