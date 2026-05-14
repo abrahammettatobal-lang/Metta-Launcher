@@ -115,11 +115,11 @@ export function buildLaunchCommand(
 
   if (jvmPieces.length > 0) {
     jvm.push(...jvmPieces);
-    jvm.push(v.mainClass);
+    jvm.push(v.mainClass ?? "");
   } else {
     jvm.push(`-Djava.library.path=${rep.natives_directory}`);
     jvm.push("-cp", rep2.classpath);
-    jvm.push(v.mainClass);
+    jvm.push(v.mainClass ?? "");
   }
   const game: string[] = [];
   if (v.minecraftArguments) {

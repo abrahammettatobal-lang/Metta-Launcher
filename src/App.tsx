@@ -62,6 +62,7 @@ function Shell({ children }: { children: React.ReactNode }) {
     <div className="ui-shell text-ink">
       <aside className="ui-rail">
         <div className="ui-rail-brand">
+          <img src="/logo.png" alt="Metta" className="h-10 w-auto mb-3 opacity-90 drop-shadow-md" />
           <div className="ui-rail-mark">Metta</div>
           <div className="ui-rail-tag">Launcher</div>
         </div>
@@ -435,7 +436,7 @@ function CreateInstance() {
 
   return (
     <div className="mx-auto max-w-xl space-y-6">
-      <div className="page-head mb-0 border-0 pb-0">
+      <div className="mb-8 border-b border-line pb-8">
         <h1 className="page-title text-2xl">Nueva instancia</h1>
         <p className="page-desc">Versión de Minecraft, mod loader y memoria asignada.</p>
       </div>
@@ -926,12 +927,12 @@ function SettingsPage() {
 
   return (
     <div className="mx-auto max-w-lg space-y-6">
-      <div className="page-head mb-0 border-0 pb-0">
+      <div className="mb-8 border-b border-line pb-8">
         <h1 className="page-title text-2xl">Ajustes</h1>
         <p className="page-desc">Ruta de datos, Java y opciones por defecto.</p>
       </div>
       <label className="block text-sm">
-        <span className="ui-field-label">Raiz del launcher</span>
+        <span className="ui-field-label">Raíz del launcher</span>
         <input
           className="ui-input font-mono text-xs"
           value={root}
