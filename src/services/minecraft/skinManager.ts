@@ -15,18 +15,30 @@ export async function applySkinAsResourcePack(
   skinData: Uint8Array,
 ): Promise<void> {
   const packRoot = `${instancePath}/resourcepacks/MettaSkin`;
-  const entityDir = `${packRoot}/assets/minecraft/textures/entity`;
+  
+  // Rutas antiguas (<= 1.20.1)
+  const oldEntityDir = `${packRoot}/assets/minecraft/textures/entity`;
+  await mkdirAllCmd(oldEntityDir);
+  await writeBinaryFile(`${oldEntityDir}/steve.png`, skinData);
+  await writeBinaryFile(`${oldEntityDir}/alex.png`, skinData);
 
-  await mkdirAllCmd(entityDir);
+  // Rutas nuevas (>= 1.20.2)
+  const slimDir = `${packRoot}/assets/minecraft/textures/entity/player/slim`;
+  const wideDir = `${packRoot}/assets/minecraft/textures/entity/player/wide`;
+  await mkdirAllCmd(slimDir);
+  await mkdirAllCmd(wideDir);
 
-  // Write steve and alex skins
-  await writeBinaryFile(`${entityDir}/steve.png`, skinData);
-  await writeBinaryFile(`${entityDir}/alex.png`, skinData);
+  const defaultNames = ["steve", "alex", "ari", "efe", "kai", "makena", "noor", "sunny", "zuri"];
+  for (const name of defaultNames) {
+    await writeBinaryFile(`${slimDir}/${name}.png`, skinData);
+    await writeBinaryFile(`${wideDir}/${name}.png`, skinData);
+  }
 
-  // Create pack.mcmeta (Format 34 is for 1.21.x, but it will work with warning on older)
+  // mcmeta con 'supported_formats' para que no marque incompatibilidad en ninguna versión
   const mcmeta = {
     pack: {
       pack_format: 34,
+      supported_formats: [1, 99],
       description: "Skin Personalizada (Metta Launcher)",
     },
   };
