@@ -1,0 +1,10 @@
+$cargoBin = "$env:USERPROFILE\.cargo\bin"
+$userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+
+if ($userPath -notlike "*$cargoBin*") {
+  [Environment]::SetEnvironmentVariable("Path", "$userPath;$cargoBin", "User")
+}
+
+$env:Path = "$env:Path;$cargoBin"
+
+cargo --version

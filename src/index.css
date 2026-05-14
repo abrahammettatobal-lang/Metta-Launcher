@@ -1,0 +1,175 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  min-height: 0;
+}
+
+#root {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  background-color: #080807;
+  background-image:
+    radial-gradient(ellipse 100% 70% at 50% -15%, rgba(201, 162, 39, 0.07), transparent 55%),
+    radial-gradient(ellipse 50% 40% at 110% 20%, rgba(120, 90, 55, 0.11), transparent),
+    linear-gradient(165deg, #12100e 0%, #080807 42%, #0a0908 100%);
+  color: #e8dcc8;
+}
+
+@layer components {
+  .ui-shell {
+    @apply flex h-full min-h-0 flex-1 flex-row;
+  }
+
+  .ui-rail {
+    @apply flex w-[14rem] shrink-0 flex-col border-r border-line bg-surface-deep/95 py-8 pl-5 pr-3;
+  }
+
+  .ui-rail-brand {
+    @apply mb-10 border-b border-line pb-8;
+  }
+
+  .ui-rail-mark {
+    @apply font-display text-xl font-semibold tracking-tight text-ink;
+  }
+
+  .ui-rail-tag {
+    @apply mt-0.5 text-[11px] font-medium uppercase tracking-[0.2em] text-ink-faint;
+  }
+
+  .ui-nav {
+    @apply flex flex-1 flex-col gap-0.5;
+  }
+
+  .ui-nav-link {
+    @apply rounded-md px-3 py-2.5 text-[13px] font-medium text-ink-muted transition-colors hover:bg-surface-raised/80 hover:text-ink;
+  }
+
+  .ui-nav-link-active {
+    @apply bg-surface-card text-ink shadow-nav;
+  }
+
+  .ui-stage {
+    @apply flex min-h-0 min-w-0 flex-1 flex-col bg-surface/80;
+  }
+
+  .ui-stage-inner {
+    @apply scrollbar-thin min-h-0 flex-1 overflow-y-auto px-6 py-8 lg:px-10 lg:py-10;
+  }
+
+  .ui-card {
+    @apply rounded-lg border border-line bg-surface-card/95 p-5 shadow-card;
+  }
+
+  .ui-card-soft {
+    @apply rounded-lg border border-line/80 bg-surface-raised/60 p-4;
+  }
+
+  .page-head {
+    @apply mb-8 flex flex-wrap items-end justify-between gap-4 border-b border-line pb-6;
+  }
+
+  .page-title {
+    @apply font-display text-3xl font-semibold tracking-tight text-ink;
+  }
+
+  .page-desc {
+    @apply mt-1 max-w-xl text-sm leading-relaxed text-ink-muted;
+  }
+
+  .ui-field-label {
+    @apply mb-1.5 block text-xs font-medium uppercase tracking-wider text-ink-faint;
+  }
+
+  .ui-input {
+    @apply w-full rounded-md border border-line bg-surface-deep px-3 py-2 text-sm text-ink placeholder:text-ink-faint/80 focus:border-accent-dim/50 focus:outline-none focus:ring-1 focus:ring-accent-glow;
+  }
+
+  .ui-btn {
+    @apply rounded-md border border-line bg-surface-raised px-3 py-2 text-sm font-medium text-ink transition hover:border-line-strong hover:bg-surface-card;
+  }
+
+  .ui-btn-sm {
+    @apply rounded-md border border-line bg-surface-raised px-3 py-1.5 text-xs font-medium text-ink-muted transition hover:border-line-strong hover:text-ink;
+  }
+
+  .ui-btn-primary {
+    @apply rounded-md border border-accent-dim/50 bg-gradient-to-b from-accent-bright/95 to-accent/90 px-6 py-3 text-sm font-semibold text-surface-deep shadow-lift transition hover:from-accent hover:to-accent-bright/95 disabled:cursor-not-allowed disabled:opacity-40;
+  }
+
+  .ui-btn-play {
+    @apply rounded-md border border-accent-dim/40 bg-gradient-to-br from-accent-bright to-accent px-10 py-3.5 text-base font-semibold text-surface-deep shadow-lift transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-40;
+  }
+
+  .ui-btn-danger {
+    @apply rounded-md border border-red-900/45 bg-red-950/35 px-3 py-1.5 text-xs font-medium text-red-200/90 transition hover:bg-red-950/55;
+  }
+
+  .ui-kbd {
+    @apply rounded bg-surface-deep px-1.5 py-0.5 font-mono text-[11px] text-ink-muted;
+  }
+
+  .ui-log {
+    @apply max-h-40 overflow-auto rounded-md border border-line bg-surface-deep/90 p-3 font-mono text-xs leading-relaxed text-ink-muted;
+  }
+
+  .ui-table-wrap {
+    @apply overflow-hidden rounded-lg border border-line;
+  }
+
+  .ui-table {
+    @apply w-full text-left text-sm;
+  }
+
+  .ui-table thead {
+    @apply border-b border-line bg-surface-deep/80 text-xs uppercase tracking-wider text-ink-faint;
+  }
+
+  .ui-table th {
+    @apply p-3 font-medium;
+  }
+
+  .ui-table tbody tr {
+    @apply border-t border-line/70;
+  }
+
+  .ui-table td {
+    @apply p-3;
+  }
+
+  .ui-section-title {
+    @apply mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-ink-faint;
+  }
+}
+
+.scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(168, 160, 149, 0.35) transparent;
+}
+
+.scrollbar-thin::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: rgba(168, 160, 149, 0.28);
+  border-radius: 999px;
+}
