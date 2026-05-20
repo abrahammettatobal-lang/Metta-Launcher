@@ -15,26 +15,26 @@ export async function applySkinAsResourcePack(
   skinData: Uint8Array,
 ): Promise<void> {
   const packRoot = `${instancePath}/resourcepacks/MettaSkin`;
-  
-  // Rutas antiguas (<= 1.20.1)
+
   const oldEntityDir = `${packRoot}/assets/minecraft/textures/entity`;
   await mkdirAllCmd(oldEntityDir);
   await writeBinaryFile(`${oldEntityDir}/steve.png`, skinData);
   await writeBinaryFile(`${oldEntityDir}/alex.png`, skinData);
 
-  // Rutas nuevas (>= 1.20.2)
   const slimDir = `${packRoot}/assets/minecraft/textures/entity/player/slim`;
   const wideDir = `${packRoot}/assets/minecraft/textures/entity/player/wide`;
   await mkdirAllCmd(slimDir);
   await mkdirAllCmd(wideDir);
 
-  const defaultNames = ["steve", "alex", "ari", "efe", "kai", "makena", "noor", "sunny", "zuri"];
+  const defaultNames = [
+    "steve", "alex", "ari", "efe", "kai",
+    "makena", "noor", "sunny", "zuri",
+  ];
   for (const name of defaultNames) {
     await writeBinaryFile(`${slimDir}/${name}.png`, skinData);
     await writeBinaryFile(`${wideDir}/${name}.png`, skinData);
   }
 
-  // mcmeta con 'supported_formats' para que no marque incompatibilidad en ninguna versión
   const mcmeta = {
     pack: {
       pack_format: 34,
@@ -44,40 +44,44 @@ export async function applySkinAsResourcePack(
   };
   await writeTextFile(`${packRoot}/pack.mcmeta`, JSON.stringify(mcmeta, null, 2));
 
-  // Enable the resource pack in options.txt
+  const packId = "file/MettaSkin";
+  await upsertOptionLine(instancePath, "resourcePacks", packId);
+  await upsertOptionLine(instancePath, "incompatibleResourcePacks", packId);
+}
+
+async function upsertOptionLine(
+  instancePath: string,
+  key: string,
+  packId: string,
+): Promise<void> {
   const optionsPath = `${instancePath}/options.txt`;
   let optionsText = "";
   if (await pathExists(optionsPath)) {
     optionsText = await readTextFile(optionsPath);
   }
+  const lines = optionsText.length
+    ? optionsText.split(/\r?\n/)
+    : [];
 
-  const lines = optionsText.split(/\r?\n/);
   let found = false;
-
   for (let i = 0; i < lines.length; i++) {
-    if (lines[i].startsWith("resourcePacks:")) {
+    if (lines[i].startsWith(`${key}:`)) {
       found = true;
-      let currentPacks = [];
+      let arr: string[] = [];
       try {
-        const val = lines[i].substring("resourcePacks:".length);
-        currentPacks = JSON.parse(val);
-      } catch (e) {
-        currentPacks = ["vanilla"];
+        arr = JSON.parse(lines[i].substring(key.length + 1));
+        if (!Array.isArray(arr)) arr = [];
+      } catch {
+        arr = key === "resourcePacks" ? ["vanilla"] : [];
       }
-      
-      // Add MettaSkin if not present
-      if (!currentPacks.includes("file/MettaSkin") && !currentPacks.includes("file/MettaSkin.zip") && !currentPacks.includes("MettaSkin")) {
-        // usually format is file/MettaSkin
-        currentPacks.push("file/MettaSkin");
-      }
-      lines[i] = `resourcePacks:${JSON.stringify(currentPacks)}`;
+      if (!arr.includes(packId)) arr.push(packId);
+      lines[i] = `${key}:${JSON.stringify(arr)}`;
       break;
     }
   }
-
   if (!found) {
-    lines.push(`resourcePacks:["vanilla","file/MettaSkin"]`);
+    const base = key === "resourcePacks" ? ["vanilla", packId] : [packId];
+    lines.push(`${key}:${JSON.stringify(base)}`);
   }
-
   await writeTextFile(optionsPath, lines.join("\n"));
 }

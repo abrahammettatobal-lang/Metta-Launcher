@@ -21,10 +21,13 @@ import {
 } from "../ui/icons";
 import { tap } from "../utils/tap";
 import { openPath } from "@tauri-apps/plugin-opener";
-
-const VERSION = "0.1.0";
+import { getVersion } from "@tauri-apps/api/app";
 
 export function SettingsPage() {
+  const [version, setVersion] = useState("…");
+  useEffect(() => {
+    void getVersion().then(setVersion).catch(() => setVersion("?"));
+  }, []);
   const [root, setRoot] = useState("");
   const [defaultRoot, setDefaultRoot] = useState("");
   const [dbPath, setDbPath] = useState("");
@@ -260,7 +263,7 @@ export function SettingsPage() {
 
           <Card eyebrow="Acerca de" title="Metta Launcher">
             <div className="grid grid-cols-2 gap-3">
-              <Info label="Versión" value={VERSION} />
+              <Info label="Versión" value={version} />
               <Info label="Plataforma" value={platformLabel()} />
             </div>
             <div className="mt-3 space-y-1.5 rounded-xl border border-line bg-canvas-deep/40 p-3 text-[11px]">

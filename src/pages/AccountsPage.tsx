@@ -1,18 +1,25 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import {
   accountAddOffline,
   accountDelete,
   accountSetActive,
   accountsList,
+  applyMicrosoftSkin,
+  instancesList,
   microsoftDevicePoll,
   microsoftDeviceStart,
+  resetMicrosoftSkin,
 } from "../services/bridge";
-import type { AccountRow } from "../services/bridge";
+import type { AccountRow, InstanceRow } from "../services/bridge";
+import {
+  applySkinAsResourcePack,
+  fetchSkinData,
+} from "../services/minecraft/skinManager";
 import { Topbar } from "../ui/Topbar";
 import { Card } from "../ui/Card";
-import { Field } from "../ui/Field";
+import { Field, FieldSelect } from "../ui/Field";
 import { Avatar } from "../ui/Avatar";
 import { Empty } from "../ui/Empty";
 import {
@@ -36,7 +43,23 @@ export function AccountsPage() {
     deviceCode: string;
   } | null>(null);
 
-  const load = useCallback(() => accountsList().then(setRows), []);
+  const [instances, setInstances] = useState<InstanceRow[]>([]);
+  const [skinName, setSkinName] = useState("");
+  const [skinVariant, setSkinVariant] = useState<"classic" | "slim">("classic");
+  const [skinInstance, setSkinInstance] = useState<string>("");
+  const [skinBusy, setSkinBusy] = useState(false);
+
+  const activeAccount = useMemo(() => rows.find((r) => r.isActive), [rows]);
+  const previewUser = (skinName.trim() || "MHF_Steve").replace(/\s+/g, "");
+
+  const load = useCallback(async () => {
+    const [accs, ins] = await Promise.all([accountsList(), instancesList()]);
+    setRows(accs);
+    setInstances(ins);
+    setSkinInstance((prev) =>
+      prev && ins.some((i) => i.id === prev) ? prev : ins[0]?.id ?? "",
+    );
+  }, []);
 
   useEffect(() => {
     void load();
@@ -239,6 +262,193 @@ export function AccountsPage() {
             ))}
           </ul>
         )}
+      </Card>
+
+      <Card
+        eyebrow="Personalización"
+        title="Selector de skin"
+        action={
+          <span className="text-[10.5px] uppercase tracking-[0.18em] text-ink-faint">
+            Powered by Minotar
+          </span>
+        }
+      >
+        <p className="text-[12.5px] leading-relaxed text-ink-muted">
+          Busca cualquier nombre de jugador y previsualiza su skin. Puedes
+          aplicarla a tu cuenta Microsoft (la cambia en Mojang) o instalarla
+          como resource pack en una instancia (para cuentas offline).
+        </p>
+
+        <div className="mt-5 grid gap-5 lg:grid-cols-[260px,1fr]">
+          <div className="flex flex-col items-center gap-3 rounded-2xl border border-line bg-canvas-raised/60 p-5">
+            <div className="relative">
+              <img
+                src={`https://crafatar.com/renders/body/${previewUser}?overlay&scale=8`}
+                alt={`Skin de ${previewUser}`}
+                className="h-64 w-auto drop-shadow-[0_18px_30px_rgba(0,0,0,0.55)]"
+                onError={(e) => {
+                  e.currentTarget.src = `https://minotar.net/armor/body/${previewUser}/256.png`;
+                }}
+              />
+            </div>
+            <div className="text-center">
+              <div className="font-display text-[15px] font-semibold tracking-tight text-ink">
+                {previewUser}
+              </div>
+              <div className="text-[10.5px] uppercase tracking-[0.22em] text-ink-faint">
+                Vista previa
+              </div>
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-4">
+            <div className="grid gap-3 sm:grid-cols-[1fr,160px]">
+              <Field
+                label="Nombre de jugador"
+                placeholder="Ej. Notch, Dream, MrBeast…"
+                value={skinName}
+                onChange={(e) => setSkinName(e.target.value)}
+              />
+              <FieldSelect
+                label="Modelo"
+                value={skinVariant}
+                onChange={(e) =>
+                  setSkinVariant(e.target.value as "classic" | "slim")
+                }
+              >
+                <option value="classic">Clásico (4px)</option>
+                <option value="slim">Slim (3px)</option>
+              </FieldSelect>
+            </div>
+
+            <div className="rounded-2xl border border-gold-500/25 bg-gold-haze/30 p-4">
+              <div className="text-[10.5px] font-semibold uppercase tracking-[0.22em] text-gold-300">
+                Cuenta Microsoft
+              </div>
+              <p className="mt-1 text-[12px] text-ink-muted">
+                {activeAccount && activeAccount.kind === "microsoft" ? (
+                  <>
+                    Se aplicará permanentemente a{" "}
+                    <span className="font-semibold text-ink">
+                      {activeAccount.username}
+                    </span>
+                    .
+                  </>
+                ) : (
+                  <>
+                    Activa una cuenta Microsoft arriba para cambiar tu skin
+                    real.
+                  </>
+                )}
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  className="btn-gold"
+                  disabled={
+                    skinBusy ||
+                    !skinName.trim() ||
+                    !activeAccount ||
+                    activeAccount.kind !== "microsoft"
+                  }
+                  onClick={() =>
+                    tap("Aplicar skin Microsoft", async () => {
+                      if (!activeAccount) return;
+                      setSkinBusy(true);
+                      try {
+                        await applyMicrosoftSkin({
+                          accountId: activeAccount.id,
+                          skinUrl: `https://minotar.net/skin/${previewUser}`,
+                          variant: skinVariant,
+                        });
+                        alert(
+                          `Skin de ${previewUser} aplicada a tu cuenta Microsoft.`,
+                        );
+                      } finally {
+                        setSkinBusy(false);
+                      }
+                    })
+                  }
+                >
+                  <IconCheck width={13} height={13} /> Aplicar a Microsoft
+                </button>
+                <button
+                  type="button"
+                  className="btn-ghost"
+                  disabled={
+                    skinBusy ||
+                    !activeAccount ||
+                    activeAccount.kind !== "microsoft"
+                  }
+                  onClick={() =>
+                    tap("Restablecer skin", async () => {
+                      if (!activeAccount) return;
+                      if (!confirm("¿Restablecer la skin por defecto?")) return;
+                      setSkinBusy(true);
+                      try {
+                        await resetMicrosoftSkin(activeAccount.id);
+                        alert("Skin restablecida.");
+                      } finally {
+                        setSkinBusy(false);
+                      }
+                    })
+                  }
+                >
+                  <IconX width={13} height={13} /> Restablecer
+                </button>
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-line bg-canvas-raised/60 p-4">
+              <div className="text-[10.5px] font-semibold uppercase tracking-[0.22em] text-ink-soft">
+                Resource pack local
+              </div>
+              <p className="mt-1 text-[12px] text-ink-muted">
+                Útil para cuentas offline: se instala como pack y se activa
+                automáticamente la próxima vez que abras Minecraft.
+              </p>
+              <div className="mt-3 grid gap-2 sm:grid-cols-[1fr,auto]">
+                <FieldSelect
+                  value={skinInstance}
+                  onChange={(e) => setSkinInstance(e.target.value)}
+                >
+                  {instances.length === 0 ? (
+                    <option value="">Sin instancias</option>
+                  ) : (
+                    instances.map((i) => (
+                      <option key={i.id} value={i.id}>
+                        {i.name} · {i.minecraftVersion}
+                      </option>
+                    ))
+                  )}
+                </FieldSelect>
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={skinBusy || !skinName.trim() || !skinInstance}
+                  onClick={() =>
+                    tap("Aplicar skin (pack)", async () => {
+                      const ins = instances.find((i) => i.id === skinInstance);
+                      if (!ins) return;
+                      setSkinBusy(true);
+                      try {
+                        const data = await fetchSkinData(previewUser);
+                        await applySkinAsResourcePack(ins.instancePath, data);
+                        alert(
+                          `Skin instalada en "${ins.name}". Si Minecraft ya estaba abierto, reinícialo para verla.`,
+                        );
+                      } finally {
+                        setSkinBusy(false);
+                      }
+                    })
+                  }
+                >
+                  <IconCheck width={13} height={13} /> Aplicar al pack
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       </Card>
     </div>
   );

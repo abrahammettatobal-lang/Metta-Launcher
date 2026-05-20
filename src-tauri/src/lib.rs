@@ -578,6 +578,8 @@ pub fn run() {
       bedrock_launch,
       bedrock_open_folder,
       bedrock_open_store,
+      apply_microsoft_skin,
+      reset_microsoft_skin,
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
@@ -613,4 +615,83 @@ async fn bedrock_open_store() -> Result<(), String> {
   tokio::task::spawn_blocking(bedrock::open_store)
     .await
     .map_err(|e| e.to_string())?
+}
+
+// ─── Skin (Microsoft accounts → Mojang Services API) ────────────────────────
+
+#[tauri::command(rename_all = "camelCase")]
+async fn apply_microsoft_skin(
+  state: State<'_, AppState>,
+  account_id: String,
+  skin_url: String,
+  variant: String,
+) -> Result<(), String> {
+  let secrets = auth::keyring_get_minecraft(&account_id)?
+    .ok_or_else(|| "Esta cuenta no es Microsoft o no tiene token guardado.".to_string())?;
+
+  let variant = match variant.to_lowercase().as_str() {
+    "slim" => "slim",
+    _ => "classic",
+  };
+
+  let bytes = state
+    .http
+    .get(&skin_url)
+    .header("User-Agent", "MettaLauncher/0.3")
+    .send()
+    .await
+    .map_err(|e| format!("Descarga de skin: {e}"))?
+    .error_for_status()
+    .map_err(|e| format!("Descarga de skin: {e}"))?
+    .bytes()
+    .await
+    .map_err(|e| format!("Descarga de skin: {e}"))?;
+
+  let part = reqwest::multipart::Part::bytes(bytes.to_vec())
+    .file_name("skin.png")
+    .mime_str("image/png")
+    .map_err(|e| e.to_string())?;
+  let form = reqwest::multipart::Form::new()
+    .text("variant", variant.to_string())
+    .part("file", part);
+
+  let res = state
+    .http
+    .post("https://api.minecraftservices.com/minecraft/profile/skins")
+    .bearer_auth(&secrets.minecraft_access_token)
+    .multipart(form)
+    .send()
+    .await
+    .map_err(|e| format!("Mojang API: {e}"))?;
+
+  let status = res.status();
+  if !status.is_success() {
+    let body = res.text().await.unwrap_or_default();
+    return Err(format!("Mojang API {status}: {body}"));
+  }
+  Ok(())
+}
+
+#[tauri::command(rename_all = "camelCase")]
+async fn reset_microsoft_skin(
+  state: State<'_, AppState>,
+  account_id: String,
+) -> Result<(), String> {
+  let secrets = auth::keyring_get_minecraft(&account_id)?
+    .ok_or_else(|| "Esta cuenta no es Microsoft o no tiene token guardado.".to_string())?;
+
+  let res = state
+    .http
+    .delete("https://api.minecraftservices.com/minecraft/profile/skins/active")
+    .bearer_auth(&secrets.minecraft_access_token)
+    .send()
+    .await
+    .map_err(|e| format!("Mojang API: {e}"))?;
+
+  let status = res.status();
+  if !status.is_success() {
+    let body = res.text().await.unwrap_or_default();
+    return Err(format!("Mojang API {status}: {body}"));
+  }
+  Ok(())
 }

@@ -244,3 +244,15 @@ export interface JavaCandidate {
 export async function javaDetect(): Promise<JavaCandidate[]> {
   return invoke("java_detect");
 }
+
+export async function applyMicrosoftSkin(payload: {
+  accountId: string;
+  skinUrl: string;
+  variant: "classic" | "slim";
+}): Promise<void> {
+  return invoke("apply_microsoft_skin", payload);
+}
+
+export async function resetMicrosoftSkin(accountId: string): Promise<void> {
+  return invoke("reset_microsoft_skin", { accountId });
+}
