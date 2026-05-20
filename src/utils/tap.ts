@@ -1,5 +1,8 @@
 /** Ejecuta una acción async y muestra el error en pantalla (Tauri invoke falla en silencio si no se captura). */
-export async function tap(label: string, fn: () => Promise<void>): Promise<void> {
+export async function tap(
+  label: string,
+  fn: () => Promise<unknown>,
+): Promise<void> {
   try {
     await fn();
   } catch (e) {

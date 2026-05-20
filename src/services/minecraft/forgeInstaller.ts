@@ -5,8 +5,24 @@ import {
   pathExists,
   readTextFile,
   runJavaJar,
+  writeTextFile,
 } from "../bridge";
 import type { McVersionJson } from "./libraryService";
+
+/** Forge's installer aborts if there isn't a `launcher_profiles.json` at the root.
+ * The file just has to exist with a valid empty-profiles JSON. */
+async function ensureLauncherProfilesStub(): Promise<void> {
+  const rel = "launcher_profiles.json";
+  if (await pathExists(rel)) return;
+  const stub = {
+    profiles: {},
+    selectedProfile: "",
+    clientToken: "00000000-0000-0000-0000-000000000000",
+    authenticationDatabase: {},
+    launcherVersion: { name: "MettaLauncher", format: 21 },
+  };
+  await writeTextFile(rel, JSON.stringify(stub, null, 2));
+}
 
 export async function listForgeVersions(mc: string): Promise<string[]> {
   const res = await fetch(
@@ -38,6 +54,9 @@ export async function installForgeSide(
   if (!(await pathExists(jarRel))) {
     await downloadFileCmd(`forge-installer-${slug}`, installerUrl, jarRel, undefined);
   }
+  // Forge's installer refuses to run if there is no launcher_profiles.json in
+  // the install target. Write a minimal stub before invoking the jar.
+  await ensureLauncherProfilesStub();
   const root = launcherRoot.replace(/\\/g, "/");
   await runJavaJar({
     javaPath,

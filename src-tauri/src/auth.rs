@@ -1,11 +1,28 @@
+use crate::db::Db;
 use keyring::Entry;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use uuid::Uuid;
 
-const MS_CLIENT_ID: &str = "00000000402b5328";
+/// Default Microsoft Java Edition client. Some Microsoft account directories
+/// have stopped serving the `/consumers/` tenant for this id, so we default
+/// to `/common/` and let users override the client id from Settings via the
+/// `microsoftClientId` setting key.
+const DEFAULT_MS_CLIENT_ID: &str = "00000000402b5328";
+const MS_TENANT: &str = "common";
 const MS_SCOPE: &str = "XboxLive.signin offline_access";
+
+fn ms_client_id(db: &Db) -> String {
+  match db.setting_get("microsoftClientId") {
+    Ok(Some(v)) if !v.trim().is_empty() => v,
+    _ => DEFAULT_MS_CLIENT_ID.to_string(),
+  }
+}
+
+fn endpoint(path: &str) -> String {
+  format!("https://login.microsoftonline.com/{MS_TENANT}/oauth2/v2.0/{path}")
+}
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -49,14 +66,18 @@ pub struct MinecraftSession {
   pub expires_at_epoch_ms: Option<i64>,
 }
 
-pub async fn microsoft_start_device_flow(client: &Client) -> Result<DeviceCodeStart, String> {
+pub async fn microsoft_start_device_flow(
+  client: &Client,
+  db: &Db,
+) -> Result<DeviceCodeStart, String> {
+  let client_id = ms_client_id(db);
   let body = format!(
     "client_id={}&scope={}",
-    urlencoding::encode(MS_CLIENT_ID),
+    urlencoding::encode(&client_id),
     urlencoding::encode(MS_SCOPE)
   );
   let res = client
-    .post("https://login.microsoftonline.com/consumers/oauth2/v2.0/devicecode")
+    .post(endpoint("devicecode"))
     .header("Content-Type", "application/x-www-form-urlencoded")
     .body(body)
     .send()
@@ -64,7 +85,9 @@ pub async fn microsoft_start_device_flow(client: &Client) -> Result<DeviceCodeSt
     .map_err(|e| e.to_string())?;
   if !res.status().is_success() {
     let t = res.text().await.unwrap_or_default();
-    return Err(format!("No se pudo iniciar el flujo de dispositivo: {t}"));
+    return Err(format!(
+      "No se pudo iniciar el flujo de dispositivo (client_id={client_id}): {t}"
+    ));
   }
   let parsed: DeviceCodeResponse = res.json().await.map_err(|e| e.to_string())?;
   Ok(DeviceCodeStart {
@@ -90,15 +113,17 @@ pub enum MicrosoftAuthOutcome {
 
 pub async fn microsoft_poll_device_code(
   client: &Client,
+  db: &Db,
   device_code: &str,
 ) -> Result<MicrosoftAuthOutcome, String> {
+  let client_id = ms_client_id(db);
   let body = format!(
     "grant_type=urn:ietf:params:oauth:grant-type:device_code&client_id={}&device_code={}",
-    urlencoding::encode(MS_CLIENT_ID),
+    urlencoding::encode(&client_id),
     urlencoding::encode(device_code)
   );
   let res = client
-    .post("https://login.microsoftonline.com/consumers/oauth2/v2.0/token")
+    .post(endpoint("token"))
     .header("Content-Type", "application/x-www-form-urlencoded")
     .body(body)
     .send()

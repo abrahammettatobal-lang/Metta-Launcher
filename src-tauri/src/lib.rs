@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod auth;
+mod bedrock;
 mod db;
 mod download;
 mod game;
@@ -273,15 +274,15 @@ fn get_launch_session(state: State<'_, AppState>, account_id: String) -> Result<
 async fn microsoft_device_start(
   state: State<'_, AppState>,
 ) -> Result<auth::DeviceCodeStart, String> {
-  auth::microsoft_start_device_flow(&state.http).await
+  auth::microsoft_start_device_flow(&state.http, &state.db).await
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 async fn microsoft_device_poll(
   state: State<'_, AppState>,
   device_code: String,
 ) -> Result<auth::MicrosoftAuthOutcome, String> {
-  let outcome = auth::microsoft_poll_device_code(&state.http, &device_code).await?;
+  let outcome = auth::microsoft_poll_device_code(&state.http, &state.db, &device_code).await?;
   if let auth::MicrosoftAuthOutcome::Success {
     ref account_id,
     ref username,
@@ -307,7 +308,7 @@ async fn microsoft_device_poll(
   Ok(outcome)
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 async fn download_file_cmd(
   app: AppHandle,
   state: State<'_, AppState>,
@@ -573,7 +574,43 @@ pub fn run() {
       spawn_java_game,
       stop_java_game,
       java_detect,
+      bedrock_detect,
+      bedrock_launch,
+      bedrock_open_folder,
+      bedrock_open_store,
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
+}
+
+// ─── Bedrock (Windows-only at runtime; commands are always registered so the
+// frontend can show a clear "platform not supported" message on other OSes).
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[tauri::command]
+async fn bedrock_detect() -> Result<bedrock::BedrockInstallation, String> {
+  tokio::task::spawn_blocking(bedrock::detect)
+    .await
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn bedrock_launch() -> Result<(), String> {
+  tokio::task::spawn_blocking(bedrock::launch)
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command(rename_all = "camelCase")]
+async fn bedrock_open_folder(kind: String) -> Result<String, String> {
+  tokio::task::spawn_blocking(move || bedrock::open_folder(&kind))
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn bedrock_open_store() -> Result<(), String> {
+  tokio::task::spawn_blocking(bedrock::open_store)
+    .await
+    .map_err(|e| e.to_string())?
 }

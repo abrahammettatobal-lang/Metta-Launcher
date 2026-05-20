@@ -1,4 +1,5 @@
 import type { McOs } from "./os";
+import { fetchVersionManifest } from "./versionManifestService";
 
 export interface LibraryDownloads {
   artifact?: { path: string; sha1: string; size: number; url: string };
@@ -109,10 +110,20 @@ export async function mergeInheritedVersionJson(
 ): Promise<McVersionJson> {
   let cur: McVersionJson = { ...base };
   const chain: McVersionJson[] = [cur];
+  let manifest: Awaited<ReturnType<typeof fetchVersionManifest>> | null = null;
   while (cur.inheritsFrom) {
     const pid = cur.inheritsFrom;
-    const url = `https://piston-meta.mojang.com/v1/packages/${pid}/${pid}.json`;
-    const res = await fetch(url);
+    // Mojang's piston-meta package URLs are content-addressed (sha1 in the path),
+    // so we cannot build them by id alone. Resolve the real URL via the manifest.
+    if (!manifest) manifest = await fetchVersionManifest();
+    const ref = manifest.versions.find((v) => v.id === pid);
+    if (!ref) {
+      throw new Error(
+        `No se pudo resolver herencia ${pid}: la versión no existe en el manifest de Mojang. ` +
+          `Revisa que tu instancia use una versión de Minecraft válida (ej. 1.21.1).`,
+      );
+    }
+    const res = await fetch(ref.url);
     if (!res.ok) throw new Error(`No se pudo resolver herencia ${pid}: HTTP ${res.status}`);
     const parent = (await res.json()) as McVersionJson;
     chain.push(parent);

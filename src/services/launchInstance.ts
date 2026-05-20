@@ -6,6 +6,7 @@ import {
   mkdirAllCmd,
   settingGet,
   spawnJavaGame,
+  stopJavaGame,
   accountsList,
 } from "./bridge";
 import type { InstanceRow } from "./bridge";
@@ -34,6 +35,7 @@ import {
   resetLaunchProgress,
   isLaunchAborted,
   resetAbortFlag,
+  abortLaunch,
 } from "./launchProgress";
 
 export { listForgeVersions } from "./minecraft/forgeInstaller";
@@ -59,7 +61,65 @@ function parseGameExtra(s: string): string[] {
     .filter(Boolean);
 }
 
+/**
+ * Tracks the currently-active launch task so that a second `launchInstance`
+ * call automatically cancels its predecessor (in-flight install or already
+ * running game) before starting.
+ */
+let _currentLaunch: Promise<void> | null = null;
+
+/**
+ * Cancel any launch / running game and wait for it to fully tear down.
+ * Safe to call from anywhere; never throws.
+ */
+export async function cancelCurrentLaunch(): Promise<void> {
+  abortLaunch();
+  try {
+    await stopJavaGame();
+  } catch (e) {
+    console.warn("[launch] stopJavaGame failed (likely no process):", e);
+  }
+  if (_currentLaunch) {
+    try {
+      await _currentLaunch;
+    } catch {
+      /* expected — prior launch threw after abort */
+    }
+  }
+}
+
 export async function launchInstance(instanceId: string): Promise<void> {
+  // Politely cancel anything already in flight (install pipeline OR a running
+  // game process). We do not want concurrent launches.
+  if (_currentLaunch) {
+    progressPreparing("Cancelando instancia previa…");
+    await logAppend(
+      "launcher",
+      "info",
+      "Cancelando instancia previa antes de lanzar una nueva",
+      instanceId,
+    );
+    await cancelCurrentLaunch();
+  } else {
+    // No tracked launch task, but there might still be a stale game process.
+    try {
+      await stopJavaGame();
+    } catch {
+      /* noop — usually nothing was running */
+    }
+  }
+
+  const task = runLaunchPipeline(instanceId);
+  _currentLaunch = task;
+  // Clear the slot when the launch finishes — only if we're still the
+  // active task (a later launch may have replaced us in the meantime).
+  void task.finally(() => {
+    if (_currentLaunch === task) _currentLaunch = null;
+  });
+  return task;
+}
+
+async function runLaunchPipeline(instanceId: string): Promise<void> {
   resetLaunchProgress();
   resetAbortFlag();
 
@@ -218,6 +278,22 @@ export async function launchInstance(instanceId: string): Promise<void> {
     env: [["METTA_LAUNCHER", "1"]],
   });
   progressRunning();
+
+  // Honor user preference: minimize the launcher window while the game runs.
+  const closeOnLaunch = (await settingGet("closeOnLaunch")) === "true";
+  if (closeOnLaunch) {
+    try {
+      const win = (await import("@tauri-apps/api/window")).getCurrentWindow();
+      await win.minimize();
+    } catch (e) {
+      await logAppend(
+        "launcher",
+        "warn",
+        `No se pudo minimizar la ventana: ${e}`,
+        instanceId,
+      );
+    }
+  }
 }
 
 export async function prepareNewInstancePaths(
