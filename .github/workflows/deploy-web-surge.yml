@@ -1,0 +1,33 @@
+name: Deploy Web to Surge
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - "web/**"
+      - ".github/workflows/deploy-web-surge.yml"
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        working-directory: web
+        run: npm install
+
+      - name: Build static Next.js site
+        working-directory: web
+        run: npm run build
+
+      - name: Deploy to Surge
+        run: npx surge ./web/out metta-launcher.surge.sh --token ${{ secrets.SURGE_TOKEN }}
