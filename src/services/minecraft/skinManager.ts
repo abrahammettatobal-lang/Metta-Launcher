@@ -1,45 +1,59 @@
-import { mkdirAllCmd, pathExists, readTextFile, writeBinaryFile, writeTextFile } from "../bridge";
+import {
+  mkdirAllCmd,
+  pathExists,
+  readTextFile,
+  writeBinaryFile,
+  writeTextFile,
+} from "../bridge";
 
-export async function fetchSkinData(username: string): Promise<Uint8Array> {
-  const url = `https://minotar.net/skin/${username}`;
-  const res = await fetch(url);
-  if (!res.ok) {
-    throw new Error(`No se pudo obtener la skin de ${username} (HTTP ${res.status})`);
-  }
-  const arrayBuffer = await res.arrayBuffer();
-  return new Uint8Array(arrayBuffer);
-}
+export type SkinModel = "classic" | "slim";
 
+/**
+ * Installs a skin PNG as a resource pack inside an instance.
+ *
+ * The PNG must be a canonical 64x64 Minecraft skin (the format Mojang's
+ * own session API serves). Legacy 64x32 textures will render mangled UVs;
+ * always prefer `resolve_minecraft_skin` from the backend over Minotar.
+ *
+ * Only the player textures matching the given model are written, so the
+ * vanilla auto-select between Steve (classic, 4px arms) and Alex (slim,
+ * 3px arms) does not produce wrong-arm rendering.
+ */
 export async function applySkinAsResourcePack(
   instancePath: string,
   skinData: Uint8Array,
+  model: SkinModel,
 ): Promise<void> {
   const packRoot = `${instancePath}/resourcepacks/MettaSkin`;
 
-  const oldEntityDir = `${packRoot}/assets/minecraft/textures/entity`;
-  await mkdirAllCmd(oldEntityDir);
-  await writeBinaryFile(`${oldEntityDir}/steve.png`, skinData);
-  await writeBinaryFile(`${oldEntityDir}/alex.png`, skinData);
+  // Legacy entity textures (used by Minecraft <= 1.20.1).
+  const legacyEntityDir = `${packRoot}/assets/minecraft/textures/entity`;
+  await mkdirAllCmd(legacyEntityDir);
+  await writeBinaryFile(`${legacyEntityDir}/steve.png`, skinData);
+  await writeBinaryFile(`${legacyEntityDir}/alex.png`, skinData);
 
-  const slimDir = `${packRoot}/assets/minecraft/textures/entity/player/slim`;
-  const wideDir = `${packRoot}/assets/minecraft/textures/entity/player/wide`;
-  await mkdirAllCmd(slimDir);
-  await mkdirAllCmd(wideDir);
+  // Modern player textures (>= 1.20.2). Each default character is tied to a
+  // specific body model, so writing to the wrong folder breaks rendering.
+  // We only populate the folder matching the supplied skin model.
+  const classicNames = ["steve", "efe", "kai", "noor", "sunny"];
+  const slimNames = ["alex", "ari", "makena", "zuri"];
 
-  const defaultNames = [
-    "steve", "alex", "ari", "efe", "kai",
-    "makena", "noor", "sunny", "zuri",
-  ];
-  for (const name of defaultNames) {
-    await writeBinaryFile(`${slimDir}/${name}.png`, skinData);
-    await writeBinaryFile(`${wideDir}/${name}.png`, skinData);
+  const targetDir =
+    model === "slim"
+      ? `${packRoot}/assets/minecraft/textures/entity/player/slim`
+      : `${packRoot}/assets/minecraft/textures/entity/player/wide`;
+  await mkdirAllCmd(targetDir);
+
+  const names = model === "slim" ? slimNames : classicNames;
+  for (const name of names) {
+    await writeBinaryFile(`${targetDir}/${name}.png`, skinData);
   }
 
   const mcmeta = {
     pack: {
       pack_format: 34,
       supported_formats: [1, 99],
-      description: "Skin Personalizada (Metta Launcher)",
+      description: `Skin Personalizada (${model === "slim" ? "Slim" : "Classic"}) — Metta Launcher`,
     },
   };
   await writeTextFile(`${packRoot}/pack.mcmeta`, JSON.stringify(mcmeta, null, 2));
@@ -59,9 +73,7 @@ async function upsertOptionLine(
   if (await pathExists(optionsPath)) {
     optionsText = await readTextFile(optionsPath);
   }
-  const lines = optionsText.length
-    ? optionsText.split(/\r?\n/)
-    : [];
+  const lines = optionsText.length ? optionsText.split(/\r?\n/) : [];
 
   let found = false;
   for (let i = 0; i < lines.length; i++) {

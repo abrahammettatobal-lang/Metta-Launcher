@@ -11,12 +11,14 @@ import {
   microsoftDevicePoll,
   microsoftDeviceStart,
   resetMicrosoftSkin,
+  resolveMinecraftSkin,
 } from "../services/bridge";
-import type { AccountRow, InstanceRow } from "../services/bridge";
-import {
-  applySkinAsResourcePack,
-  fetchSkinData,
-} from "../services/minecraft/skinManager";
+import type {
+  AccountRow,
+  InstanceRow,
+  ResolvedSkin,
+} from "../services/bridge";
+import { applySkinAsResourcePack } from "../services/minecraft/skinManager";
 import { Topbar } from "../ui/Topbar";
 import { Card } from "../ui/Card";
 import { Field, FieldSelect } from "../ui/Field";
@@ -45,12 +47,14 @@ export function AccountsPage() {
 
   const [instances, setInstances] = useState<InstanceRow[]>([]);
   const [skinName, setSkinName] = useState("");
-  const [skinVariant, setSkinVariant] = useState<"classic" | "slim">("classic");
   const [skinInstance, setSkinInstance] = useState<string>("");
   const [skinBusy, setSkinBusy] = useState(false);
+  const [resolved, setResolved] = useState<ResolvedSkin | null>(null);
+  const [resolving, setResolving] = useState(false);
+  const [resolveError, setResolveError] = useState<string | null>(null);
 
   const activeAccount = useMemo(() => rows.find((r) => r.isActive), [rows]);
-  const previewUser = (skinName.trim() || "MHF_Steve").replace(/\s+/g, "");
+  const trimmedName = skinName.trim();
 
   const load = useCallback(async () => {
     const [accs, ins] = await Promise.all([accountsList(), instancesList()]);
@@ -64,6 +68,74 @@ export function AccountsPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    if (!trimmedName) {
+      setResolved(null);
+      setResolveError(null);
+      return;
+    }
+    let cancelled = false;
+    setResolving(true);
+    setResolveError(null);
+    const handle = setTimeout(async () => {
+      try {
+        const r = await resolveMinecraftSkin(trimmedName);
+        if (!cancelled) {
+          setResolved(r);
+          setResolveError(null);
+        }
+      } catch (e) {
+        if (!cancelled) {
+          setResolved(null);
+          setResolveError(String(e));
+        }
+      } finally {
+        if (!cancelled) setResolving(false);
+      }
+    }, 450);
+    return () => {
+      cancelled = true;
+      clearTimeout(handle);
+    };
+  }, [trimmedName]);
+
+  const uuidWithDashes = useMemo(() => {
+    const u = resolved?.uuid ?? "";
+    if (!u || u.includes("-")) return u;
+    return `${u.slice(0, 8)}-${u.slice(8, 12)}-${u.slice(12, 16)}-${u.slice(16, 20)}-${u.slice(20)}`;
+  }, [resolved]);
+
+  const skinBlobUrl = useMemo(() => {
+    if (!resolved) return null;
+    const blob = new Blob([new Uint8Array(resolved.skinBytes)], {
+      type: "image/png",
+    });
+    return URL.createObjectURL(blob);
+  }, [resolved]);
+
+  useEffect(() => {
+    return () => {
+      if (skinBlobUrl) URL.revokeObjectURL(skinBlobUrl);
+    };
+  }, [skinBlobUrl]);
+
+  const remoteRenderUrls = useMemo(() => {
+    if (!resolved) return [];
+    return [
+      `https://api.mineatar.io/body/full/${resolved.uuid}?scale=8`,
+      `https://mc-heads.net/body/${uuidWithDashes}/right`,
+      `https://crafatar.com/renders/body/${uuidWithDashes}?overlay&scale=8`,
+    ];
+  }, [resolved, uuidWithDashes]);
+
+  const [remoteIdx, setRemoteIdx] = useState(0);
+  const [remoteFailed, setRemoteFailed] = useState(false);
+
+  useEffect(() => {
+    setRemoteIdx(0);
+    setRemoteFailed(false);
+  }, [resolved?.uuid]);
 
   return (
     <div className="space-y-6">
@@ -269,57 +341,71 @@ export function AccountsPage() {
         title="Selector de skin"
         action={
           <span className="text-[10.5px] uppercase tracking-[0.18em] text-ink-faint">
-            Powered by Minotar
+            Fuente · sessionserver.mojang.com
           </span>
         }
       >
         <p className="text-[12.5px] leading-relaxed text-ink-muted">
-          Busca cualquier nombre de jugador y previsualiza su skin. Puedes
-          aplicarla a tu cuenta Microsoft (la cambia en Mojang) o instalarla
-          como resource pack en una instancia (para cuentas offline).
+          Busca cualquier jugador real (Premium o histórico). La skin se
+          obtiene directamente de Mojang en formato canónico 64×64, así que
+          se ve igual que en el juego. El modelo (clásico o slim) se detecta
+          automáticamente del perfil.
         </p>
 
         <div className="mt-5 grid gap-5 lg:grid-cols-[260px,1fr]">
           <div className="flex flex-col items-center gap-3 rounded-2xl border border-line bg-canvas-raised/60 p-5">
-            <div className="relative">
-              <img
-                src={`https://crafatar.com/renders/body/${previewUser}?overlay&scale=8`}
-                alt={`Skin de ${previewUser}`}
-                className="h-64 w-auto drop-shadow-[0_18px_30px_rgba(0,0,0,0.55)]"
-                onError={(e) => {
-                  e.currentTarget.src = `https://minotar.net/armor/body/${previewUser}/256.png`;
-                }}
-              />
-            </div>
-            <div className="text-center">
-              <div className="font-display text-[15px] font-semibold tracking-tight text-ink">
-                {previewUser}
+            {resolved ? (
+              <>
+                <div className="flex h-64 w-full items-center justify-center">
+                  {!remoteFailed && remoteIdx < remoteRenderUrls.length ? (
+                    <img
+                      key={remoteRenderUrls[remoteIdx]}
+                      src={remoteRenderUrls[remoteIdx]}
+                      alt={`Skin de ${resolved.name}`}
+                      className="h-64 w-auto drop-shadow-[0_18px_30px_rgba(0,0,0,0.55)] [image-rendering:pixelated]"
+                      onError={() => {
+                        if (remoteIdx + 1 < remoteRenderUrls.length) {
+                          setRemoteIdx(remoteIdx + 1);
+                        } else {
+                          setRemoteFailed(true);
+                        }
+                      }}
+                    />
+                  ) : skinBlobUrl ? (
+                    <img
+                      src={skinBlobUrl}
+                      alt={`Skin de ${resolved.name}`}
+                      className="h-56 w-56 [image-rendering:pixelated] drop-shadow-[0_18px_30px_rgba(0,0,0,0.55)]"
+                    />
+                  ) : null}
+                </div>
+                <div className="text-center">
+                  <div className="font-display text-[15px] font-semibold tracking-tight text-ink">
+                    {resolved.name}
+                  </div>
+                  <div className="mt-1 inline-flex items-center gap-1.5 rounded-md border border-gold-500/30 bg-gold-haze/40 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-gold-200">
+                    Modelo {resolved.model === "slim" ? "Slim (3px)" : "Classic (4px)"}
+                  </div>
+                </div>
+              </>
+            ) : (
+              <div className="flex h-64 w-full items-center justify-center text-center text-[11.5px] text-ink-faint">
+                {resolving
+                  ? "Buscando jugador…"
+                  : resolveError
+                    ? resolveError
+                    : "Escribe un nombre para previsualizar."}
               </div>
-              <div className="text-[10.5px] uppercase tracking-[0.22em] text-ink-faint">
-                Vista previa
-              </div>
-            </div>
+            )}
           </div>
 
           <div className="flex flex-col gap-4">
-            <div className="grid gap-3 sm:grid-cols-[1fr,160px]">
-              <Field
-                label="Nombre de jugador"
-                placeholder="Ej. Notch, Dream, MrBeast…"
-                value={skinName}
-                onChange={(e) => setSkinName(e.target.value)}
-              />
-              <FieldSelect
-                label="Modelo"
-                value={skinVariant}
-                onChange={(e) =>
-                  setSkinVariant(e.target.value as "classic" | "slim")
-                }
-              >
-                <option value="classic">Clásico (4px)</option>
-                <option value="slim">Slim (3px)</option>
-              </FieldSelect>
-            </div>
+            <Field
+              label="Nombre de jugador"
+              placeholder="Ej. Notch, Dream, MrBeast…"
+              value={skinName}
+              onChange={(e) => setSkinName(e.target.value)}
+            />
 
             <div className="rounded-2xl border border-gold-500/25 bg-gold-haze/30 p-4">
               <div className="text-[10.5px] font-semibold uppercase tracking-[0.22em] text-gold-300">
@@ -332,13 +418,21 @@ export function AccountsPage() {
                     <span className="font-semibold text-ink">
                       {activeAccount.username}
                     </span>
-                    .
+                    {resolved ? (
+                      <>
+                        {" "}
+                        usando el modelo{" "}
+                        <span className="font-semibold text-ink">
+                          {resolved.model}
+                        </span>
+                        .
+                      </>
+                    ) : (
+                      "."
+                    )}
                   </>
                 ) : (
-                  <>
-                    Activa una cuenta Microsoft arriba para cambiar tu skin
-                    real.
-                  </>
+                  <>Activa una cuenta Microsoft arriba para cambiar tu skin real.</>
                 )}
               </p>
               <div className="mt-3 flex flex-wrap gap-2">
@@ -347,22 +441,22 @@ export function AccountsPage() {
                   className="btn-gold"
                   disabled={
                     skinBusy ||
-                    !skinName.trim() ||
+                    !resolved ||
                     !activeAccount ||
                     activeAccount.kind !== "microsoft"
                   }
                   onClick={() =>
                     tap("Aplicar skin Microsoft", async () => {
-                      if (!activeAccount) return;
+                      if (!activeAccount || !resolved) return;
                       setSkinBusy(true);
                       try {
                         await applyMicrosoftSkin({
                           accountId: activeAccount.id,
-                          skinUrl: `https://minotar.net/skin/${previewUser}`,
-                          variant: skinVariant,
+                          skinUrl: resolved.skinUrl,
+                          variant: resolved.model,
                         });
                         alert(
-                          `Skin de ${previewUser} aplicada a tu cuenta Microsoft.`,
+                          `Skin de ${resolved.name} aplicada a tu cuenta Microsoft.`,
                         );
                       } finally {
                         setSkinBusy(false);
@@ -401,11 +495,12 @@ export function AccountsPage() {
 
             <div className="rounded-2xl border border-line bg-canvas-raised/60 p-4">
               <div className="text-[10.5px] font-semibold uppercase tracking-[0.22em] text-ink-soft">
-                Resource pack local
+                Resource pack local (cuentas offline)
               </div>
               <p className="mt-1 text-[12px] text-ink-muted">
-                Útil para cuentas offline: se instala como pack y se activa
-                automáticamente la próxima vez que abras Minecraft.
+                Reemplaza la textura por defecto en una instancia. Sólo es
+                visible para ti en partidas offline o servidores propios; en
+                servidores Premium cada jugador ve su skin real.
               </p>
               <div className="mt-3 grid gap-2 sm:grid-cols-[1fr,auto]">
                 <FieldSelect
@@ -425,17 +520,21 @@ export function AccountsPage() {
                 <button
                   type="button"
                   className="btn"
-                  disabled={skinBusy || !skinName.trim() || !skinInstance}
+                  disabled={skinBusy || !resolved || !skinInstance}
                   onClick={() =>
                     tap("Aplicar skin (pack)", async () => {
                       const ins = instances.find((i) => i.id === skinInstance);
-                      if (!ins) return;
+                      if (!ins || !resolved) return;
                       setSkinBusy(true);
                       try {
-                        const data = await fetchSkinData(previewUser);
-                        await applySkinAsResourcePack(ins.instancePath, data);
+                        const bytes = new Uint8Array(resolved.skinBytes);
+                        await applySkinAsResourcePack(
+                          ins.instancePath,
+                          bytes,
+                          resolved.model,
+                        );
                         alert(
-                          `Skin instalada en "${ins.name}". Si Minecraft ya estaba abierto, reinícialo para verla.`,
+                          `Skin de ${resolved.name} instalada en "${ins.name}". Si Minecraft ya estaba abierto, reinícialo para verla.`,
                         );
                       } finally {
                         setSkinBusy(false);

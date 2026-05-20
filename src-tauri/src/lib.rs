@@ -580,6 +580,7 @@ pub fn run() {
       bedrock_open_store,
       apply_microsoft_skin,
       reset_microsoft_skin,
+      resolve_minecraft_skin,
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
@@ -618,6 +619,131 @@ async fn bedrock_open_store() -> Result<(), String> {
 }
 
 // ─── Skin (Microsoft accounts → Mojang Services API) ────────────────────────
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResolvedSkin {
+  pub uuid: String,
+  pub name: String,
+  pub skin_url: String,
+  pub model: String,
+  pub skin_bytes: Vec<u8>,
+}
+
+#[tauri::command(rename_all = "camelCase")]
+async fn resolve_minecraft_skin(
+  state: State<'_, AppState>,
+  username: String,
+) -> Result<ResolvedSkin, String> {
+  use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
+
+  let trimmed = username.trim();
+  if trimmed.is_empty() {
+    return Err("Nombre vacío.".into());
+  }
+
+  let lookup_url = format!(
+    "https://api.mojang.com/users/profiles/minecraft/{}",
+    urlencoding::encode(trimmed)
+  );
+  let lookup_res = state
+    .http
+    .get(&lookup_url)
+    .header("User-Agent", "MettaLauncher/0.3")
+    .send()
+    .await
+    .map_err(|e| format!("Mojang lookup: {e}"))?;
+  if lookup_res.status() == 204 || lookup_res.status() == 404 {
+    return Err(format!("El jugador \"{trimmed}\" no existe en Mojang."));
+  }
+  let lookup_json: serde_json::Value = lookup_res
+    .error_for_status()
+    .map_err(|e| format!("Mojang lookup: {e}"))?
+    .json()
+    .await
+    .map_err(|e| e.to_string())?;
+  let uuid = lookup_json
+    .get("id")
+    .and_then(|v| v.as_str())
+    .ok_or("Respuesta inválida del API de Mojang.")?
+    .to_string();
+  let real_name = lookup_json
+    .get("name")
+    .and_then(|v| v.as_str())
+    .unwrap_or(trimmed)
+    .to_string();
+
+  let profile_url = format!(
+    "https://sessionserver.mojang.com/session/minecraft/profile/{}?unsigned=true",
+    uuid
+  );
+  let profile: serde_json::Value = state
+    .http
+    .get(&profile_url)
+    .header("User-Agent", "MettaLauncher/0.3")
+    .send()
+    .await
+    .map_err(|e| format!("Mojang session: {e}"))?
+    .error_for_status()
+    .map_err(|e| format!("Mojang session: {e}"))?
+    .json()
+    .await
+    .map_err(|e| e.to_string())?;
+
+  let properties = profile
+    .get("properties")
+    .and_then(|v| v.as_array())
+    .ok_or("Perfil sin propiedades de textura.")?;
+  let textures_prop = properties
+    .iter()
+    .find(|p| p.get("name").and_then(|n| n.as_str()) == Some("textures"))
+    .ok_or("El perfil no tiene textura de skin.")?;
+  let value_b64 = textures_prop
+    .get("value")
+    .and_then(|v| v.as_str())
+    .ok_or("Textura sin payload base64.")?;
+  let decoded_bytes = B64
+    .decode(value_b64)
+    .map_err(|e| format!("base64: {e}"))?;
+  let decoded: serde_json::Value =
+    serde_json::from_slice(&decoded_bytes).map_err(|e| e.to_string())?;
+
+  let skin = decoded
+    .pointer("/textures/SKIN")
+    .ok_or("El jugador no tiene skin personalizada (usa la skin por defecto).")?;
+  let skin_url = skin
+    .get("url")
+    .and_then(|v| v.as_str())
+    .ok_or("Skin sin URL.")?
+    .to_string();
+  let model = skin
+    .pointer("/metadata/model")
+    .and_then(|v| v.as_str())
+    .unwrap_or("classic");
+  let model = if model == "slim" { "slim" } else { "classic" };
+
+  let bytes = state
+    .http
+    .get(&skin_url)
+    .header("User-Agent", "MettaLauncher/0.3")
+    .send()
+    .await
+    .map_err(|e| format!("Descarga de skin: {e}"))?
+    .error_for_status()
+    .map_err(|e| format!("Descarga de skin: {e}"))?
+    .bytes()
+    .await
+    .map_err(|e| format!("Descarga de skin: {e}"))?
+    .to_vec();
+
+  Ok(ResolvedSkin {
+    uuid,
+    name: real_name,
+    skin_url,
+    model: model.to_string(),
+    skin_bytes: bytes,
+  })
+}
 
 #[tauri::command(rename_all = "camelCase")]
 async fn apply_microsoft_skin(

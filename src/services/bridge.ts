@@ -256,3 +256,17 @@ export async function applyMicrosoftSkin(payload: {
 export async function resetMicrosoftSkin(accountId: string): Promise<void> {
   return invoke("reset_microsoft_skin", { accountId });
 }
+
+export interface ResolvedSkin {
+  uuid: string;
+  name: string;
+  skinUrl: string;
+  model: "classic" | "slim";
+  skinBytes: number[];
+}
+
+export async function resolveMinecraftSkin(
+  username: string,
+): Promise<ResolvedSkin> {
+  return invoke("resolve_minecraft_skin", { username });
+}
