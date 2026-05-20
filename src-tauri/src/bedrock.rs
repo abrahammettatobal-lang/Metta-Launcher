@@ -220,13 +220,31 @@ pub fn detect() -> BedrockInstallation {
 
 #[cfg(windows)]
 pub fn launch() -> Result<(), String> {
-  // `explorer.exe shell:AppsFolder\...!App` *navigates* to the shell namespace
-  // (Windows happily opens Documents if the AUMID is not recognised as a
-  // folder), and `cmd /C start "" shell:...!App` eats the `!` due to delayed
-  // expansion. PowerShell's Start-Process correctly resolves the AppsFolder
-  // alias via ShellExecuteEx and is the most reliable launcher for UWP AUMIDs.
+  // Why we don't use simpler approaches:
+  //   * `cmd /C start "" shell:AppsFolder\...!App` → cmd's delayed expansion
+  //     eats the `!` and the AUMID becomes "...8wekyb3d8bbweApp".
+  //   * `explorer.exe shell:AppsFolder\...!App`    → explorer *navigates* the
+  //     shell namespace (and falls back to Documents) instead of activating
+  //     the app.
+  //   * `powershell Start-Process 'shell:...'`     → PowerShell uses
+  //     `CreateProcess`, not `ShellExecute`, so the `shell:` URI fails with
+  //     "El sistema no puede encontrar el archivo".
+  //
+  // The reliable approach is `Shell.Application::ShellExecute`, which delegates
+  // to Win32 `ShellExecuteEx` and correctly resolves AppsFolder AUMIDs.
   let alias = format!("shell:AppsFolder\\{PACKAGE_FAMILY}!App");
-  let script = format!("Start-Process -FilePath '{alias}'");
+  shell_execute_via_com(&alias)
+    .map_err(|e| format!("No se pudo lanzar Minecraft Bedrock: {e}"))
+}
+
+#[cfg(windows)]
+fn shell_execute_via_com(target: &str) -> Result<(), String> {
+  // The target is wrapped in single quotes inside a PowerShell string; escape
+  // any embedded single quote per PowerShell rules.
+  let escaped = target.replace('\'', "''");
+  let script = format!(
+    "(New-Object -ComObject Shell.Application).ShellExecute('{escaped}')"
+  );
   Command::new("powershell.exe")
     .args([
       "-NoProfile",
@@ -237,7 +255,7 @@ pub fn launch() -> Result<(), String> {
       &script,
     ])
     .spawn()
-    .map_err(|e| format!("No se pudo lanzar Minecraft Bedrock: {e}"))?;
+    .map_err(|e| e.to_string())?;
   Ok(())
 }
 
@@ -283,22 +301,10 @@ pub fn open_folder(kind: &str) -> Result<String, String> {
 
 #[cfg(windows)]
 pub fn open_store() -> Result<(), String> {
-  // Same reasoning as `launch`: PowerShell's Start-Process resolves the
-  // `ms-windows-store://` protocol via ShellExecuteEx, whereas explorer.exe
-  // can fall back to opening Documents.
-  let script = format!("Start-Process -FilePath '{STORE_PDP_URL}'");
-  Command::new("powershell.exe")
-    .args([
-      "-NoProfile",
-      "-NonInteractive",
-      "-WindowStyle",
-      "Hidden",
-      "-Command",
-      &script,
-    ])
-    .spawn()
-    .map_err(|e| format!("No se pudo abrir Microsoft Store: {e}"))?;
-  Ok(())
+  // Same reasoning as `launch`: only Win32 ShellExecute (via the Shell COM
+  // automation object) reliably resolves the `ms-windows-store://` protocol.
+  shell_execute_via_com(STORE_PDP_URL)
+    .map_err(|e| format!("No se pudo abrir Microsoft Store: {e}"))
 }
 
 #[cfg(not(windows))]
