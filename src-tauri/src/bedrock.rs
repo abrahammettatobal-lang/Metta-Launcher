@@ -220,12 +220,22 @@ pub fn detect() -> BedrockInstallation {
 
 #[cfg(windows)]
 pub fn launch() -> Result<(), String> {
-  // We must go through `explorer.exe` because `cmd /C start` eats the `!` in
-  // the AppsFolder alias (delayed expansion) which produces:
-  //   "Windows no puede encontrar el archivo 'shell:AppsFolder\\...App'"
+  // `explorer.exe shell:AppsFolder\...!App` *navigates* to the shell namespace
+  // (Windows happily opens Documents if the AUMID is not recognised as a
+  // folder), and `cmd /C start "" shell:...!App` eats the `!` due to delayed
+  // expansion. PowerShell's Start-Process correctly resolves the AppsFolder
+  // alias via ShellExecuteEx and is the most reliable launcher for UWP AUMIDs.
   let alias = format!("shell:AppsFolder\\{PACKAGE_FAMILY}!App");
-  Command::new("explorer.exe")
-    .arg(&alias)
+  let script = format!("Start-Process -FilePath '{alias}'");
+  Command::new("powershell.exe")
+    .args([
+      "-NoProfile",
+      "-NonInteractive",
+      "-WindowStyle",
+      "Hidden",
+      "-Command",
+      &script,
+    ])
     .spawn()
     .map_err(|e| format!("No se pudo lanzar Minecraft Bedrock: {e}"))?;
   Ok(())
@@ -273,10 +283,19 @@ pub fn open_folder(kind: &str) -> Result<String, String> {
 
 #[cfg(windows)]
 pub fn open_store() -> Result<(), String> {
-  // Use explorer.exe so the `&` and `?` in the protocol URL aren't reinterpreted
-  // by cmd. Windows resolves `ms-windows-store://` directly.
-  Command::new("explorer.exe")
-    .arg(STORE_PDP_URL)
+  // Same reasoning as `launch`: PowerShell's Start-Process resolves the
+  // `ms-windows-store://` protocol via ShellExecuteEx, whereas explorer.exe
+  // can fall back to opening Documents.
+  let script = format!("Start-Process -FilePath '{STORE_PDP_URL}'");
+  Command::new("powershell.exe")
+    .args([
+      "-NoProfile",
+      "-NonInteractive",
+      "-WindowStyle",
+      "Hidden",
+      "-Command",
+      &script,
+    ])
     .spawn()
     .map_err(|e| format!("No se pudo abrir Microsoft Store: {e}"))?;
   Ok(())
