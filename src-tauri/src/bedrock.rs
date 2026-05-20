@@ -163,9 +163,12 @@ pub fn detect() -> BedrockInstallation {
     });
 
   let pfn = get_str("PackageFamilyName").or_else(|| Some(PACKAGE_FAMILY.to_string()));
-  let alias = pfn
-    .as_ref()
-    .map(|n| format!("shell:AppsFolder\\{n}!App"));
+  // Prefer the AUMID exposed by the Start menu (authoritative); fall back to
+  // "<PFN>!App" if Get-StartApps doesn't return anything for diagnostics.
+  let alias = match find_minecraft_aumid() {
+    Ok(aumid) => Some(format!("shell:AppsFolder\\{aumid}")),
+    Err(_) => pfn.as_ref().map(|n| format!("shell:AppsFolder\\{n}!App")),
+  };
   let install_path = get_str("InstallLocation");
   let publisher = get_str("Publisher");
   let architecture = get_str("Architecture");
@@ -232,9 +235,35 @@ pub fn launch() -> Result<(), String> {
   //
   // The reliable approach is `Shell.Application::ShellExecute`, which delegates
   // to Win32 `ShellExecuteEx` and correctly resolves AppsFolder AUMIDs.
-  let alias = format!("shell:AppsFolder\\{PACKAGE_FAMILY}!App");
+  //
+  // The Application Id (the part after `!`) is *not* guaranteed to be `App`,
+  // so we always query the actual AUMID from `Get-StartApps`.
+  let aumid = find_minecraft_aumid()?;
+  let alias = format!("shell:AppsFolder\\{aumid}");
   shell_execute_via_com(&alias)
-    .map_err(|e| format!("No se pudo lanzar Minecraft Bedrock: {e}"))
+    .map_err(|e| format!("No se pudo lanzar Minecraft Bedrock ({alias}): {e}"))
+}
+
+#[cfg(windows)]
+fn find_minecraft_aumid() -> Result<String, String> {
+  // `Get-StartApps` lists every entry the Start menu can activate, with its
+  // canonical AUMID. We pick anything whose AppID starts with our package
+  // family — that's the authoritative source.
+  let script = "$ErrorActionPreference = 'Stop'; \
+    $a = Get-StartApps \
+      | Where-Object { $_.AppID -like 'Microsoft.MinecraftUWP_*' } \
+      | Select-Object -First 1; \
+    if ($null -eq $a) { '' } else { $a.AppID }";
+  let aumid = run_powershell(script)?;
+  if aumid.is_empty() {
+    return Err(
+      "No se encontró el AUMID de Minecraft Bedrock en Get-StartApps. \
+       Asegúrate de que Minecraft for Windows esté instalado y aparezca en \
+       el menú Inicio."
+        .into(),
+    );
+  }
+  Ok(aumid)
 }
 
 #[cfg(windows)]
