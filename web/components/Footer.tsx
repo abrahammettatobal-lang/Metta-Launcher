@@ -71,9 +71,25 @@ export function Footer() {
 
         <div className="divider mt-12" />
 
-        <div className="mt-6 flex flex-col items-start justify-between gap-3 text-[11.5px] text-ink-faint sm:flex-row sm:items-center">
-          <div>© {year} Metta Launcher · Hecho con cariño para la comunidad.</div>
-          <div className="text-pretty sm:text-right">
+        <div className="mt-6 flex flex-col items-start justify-between gap-4 text-[11.5px] text-ink-faint sm:flex-row sm:items-center">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <span className="text-ink-soft">
+              © {year} Metta Launcher
+            </span>
+            <span className="text-ink-faint/60">·</span>
+            <span>Todos los derechos reservados.</span>
+            <span className="text-ink-faint/60">·</span>
+            <a
+              href={`${REPO_URL}/blob/main/LICENSE`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 text-ink-muted transition-colors hover:text-gold-200"
+              aria-label="Ver la licencia MIT en GitHub"
+            >
+              Licencia MIT
+            </a>
+          </div>
+          <div className="text-pretty sm:max-w-md sm:text-right">
             Metta Launcher no está afiliado con Mojang, Microsoft ni Minecraft.{" "}
             <span className="text-ink-muted">
               Minecraft es una marca registrada de Mojang Studios.
