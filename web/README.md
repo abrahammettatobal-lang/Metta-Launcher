@@ -28,15 +28,19 @@ como sitio estático. Eso permite:
 1. Crea un proyecto en [Railway](https://railway.com) → **Deploy from GitHub**.
 2. Selecciona este repositorio.
 3. En **Settings → Root Directory** pon: `web`
-4. Variables (Settings → Variables):
-   - `NEXT_PUBLIC_SITE_URL` = tu URL pública (ej. `https://metta-launcher.up.railway.app` o dominio custom)
+4. **Networking → Public Networking → Generate Domain** (o asigna):
+   `metta-launcher.railway.app`
+5. Variables (Settings → Variables):
+   - `NEXT_PUBLIC_SITE_URL` = `https://metta-launcher.railway.app`
    - `PORT` lo asigna Railway automáticamente; no hace falta definirlo.
-5. Deploy. Railway usa `railway.json` + `nixpacks.toml` en `web/`.
-6. Health check: `GET /api/health/` debe responder `{ "ok": true }`.
+6. Deploy. Railway usa `railway.json` + `nixpacks.toml` en `web/`.
+7. Comprueba:
+   - Sitio: https://metta-launcher.railway.app
+   - Health: https://metta-launcher.railway.app/api/health/
 
-### Dominio custom
+### Otro dominio custom
 
-Settings → Networking → **Custom Domain** → apunta CNAME a Railway y actualiza
+Settings → Networking → **Custom Domain** → apunta CNAME y actualiza
 `NEXT_PUBLIC_SITE_URL` con la URL final.
 
 ### Añadir APIs nuevas

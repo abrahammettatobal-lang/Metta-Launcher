@@ -1,9 +1,8 @@
 import type { Metadata, Viewport } from "next";
+import { DEFAULT_SITE_URL } from "@/data/site";
 import "./globals.css";
 
-const SITE_URL =
-  process.env.NEXT_PUBLIC_SITE_URL ??
-  "https://metta-launcher.up.railway.app";
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? DEFAULT_SITE_URL;
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
