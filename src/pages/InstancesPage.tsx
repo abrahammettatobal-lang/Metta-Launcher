@@ -1,25 +1,32 @@
 import { openPath } from "@tauri-apps/plugin-opener";
+import { open } from "@tauri-apps/plugin-dialog";
 import { useCallback, useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import {
   appPaths,
+  backupsList,
   dirDiskUsage,
+  instanceBackup,
   instanceDelete,
   instanceGet,
+  instanceImportZip,
+  instanceRestoreBackup,
   instanceSave,
   instancesList,
+  type BackupListItem,
+  type InstanceRow,
 } from "../services/bridge";
-import type { InstanceRow } from "../services/bridge";
-import { prepareNewInstancePaths } from "../services/launchInstance";
 import { Topbar } from "../ui/Topbar";
 import { Avatar } from "../ui/Avatar";
 import { Empty } from "../ui/Empty";
 import {
   IconCopy,
   IconCubes,
+  IconDownload,
   IconFolder,
   IconPlus,
+  IconRefresh,
   IconTrash,
 } from "../ui/icons";
 import { tap } from "../utils/tap";
@@ -29,6 +36,7 @@ import { formatBytes, loaderLabel, relativeTime } from "../utils/format";
 export function InstancesPage() {
   const [rows, setRows] = useState<InstanceRow[]>([]);
   const [sizes, setSizes] = useState<Record<string, number>>({});
+  const [backups, setBackups] = useState<BackupListItem[]>([]);
   const nav = useNavigate();
 
   const reload = useCallback(async () => {
@@ -43,6 +51,11 @@ export function InstancesPage() {
       }
     }
     setSizes(m);
+    try {
+      setBackups(await backupsList());
+    } catch {
+      setBackups([]);
+    }
   }, []);
 
   useEffect(() => {
@@ -56,14 +69,60 @@ export function InstancesPage() {
         title="Instancias"
         subtitle="Gestiona, duplica o elimina los mundos que has configurado."
         actions={
-          <button
-            type="button"
-            onClick={() => nav("/create")}
-            className="btn-gold"
-          >
-            <IconPlus width={14} height={14} />
-            Nueva instancia
-          </button>
+          <>
+            <button
+              type="button"
+              className="btn"
+              onClick={() =>
+                tap("Importar ZIP", async () => {
+                  const picked = await open({
+                    multiple: false,
+                    filters: [{ name: "ZIP", extensions: ["zip"] }],
+                  });
+                  if (!picked || Array.isArray(picked)) return;
+                  const base =
+                    picked.split(/[/\\]/).pop()?.replace(/\.zip$/i, "") ??
+                    "Importada";
+                  const name = prompt("Nombre de la instancia:", base);
+                  if (!name?.trim()) return;
+                  const rel = await instanceImportZip(picked, name.trim());
+                  const id = rel.split("/").pop() ?? crypto.randomUUID();
+                  const now = new Date().toISOString();
+                  const row: InstanceRow = {
+                    id,
+                    name: name.trim(),
+                    minecraftVersion: "1.21.1",
+                    loaderType: "vanilla",
+                    loaderVersion: "",
+                    instancePath: rel,
+                    icon: "",
+                    minRamMb: 1024,
+                    maxRamMb: 4096,
+                    javaPath: null,
+                    jvmArgs: "",
+                    gameArgs: "",
+                    gameResolution: null,
+                    lastPlayedAt: null,
+                    createdAt: now,
+                    updatedAt: now,
+                  };
+                  await instanceSave(row);
+                  await reload();
+                  nav(`/instances/${id}/edit`);
+                })
+              }
+            >
+              <IconDownload width={14} height={14} /> Importar ZIP
+            </button>
+            <button
+              type="button"
+              onClick={() => nav("/create")}
+              className="btn-gold"
+            >
+              <IconPlus width={14} height={14} />
+              Nueva instancia
+            </button>
+          </>
         }
       />
 
@@ -120,6 +179,13 @@ export function InstancesPage() {
                 <button
                   type="button"
                   className="btn-ghost text-[11.5px]"
+                  onClick={() => nav(`/instances/${i.id}/edit`)}
+                >
+                  Editar
+                </button>
+                <button
+                  type="button"
+                  className="btn-ghost text-[11.5px]"
                   onClick={() =>
                     tap("Abrir carpeta", async () => {
                       const p = await fullPath(i.instancePath);
@@ -129,6 +195,58 @@ export function InstancesPage() {
                 >
                   <IconFolder width={13} height={13} /> Carpeta
                 </button>
+                <button
+                  type="button"
+                  className="btn-ghost text-[11.5px]"
+                  onClick={() =>
+                    tap("Backup", async () => {
+                      const label = prompt(
+                        "Nombre del backup:",
+                        `${i.name}-${new Date().toISOString().slice(0, 10)}`,
+                      );
+                      if (!label?.trim()) return;
+                      await instanceBackup(i.instancePath, label.trim());
+                      await reload();
+                    })
+                  }
+                >
+                  Backup
+                </button>
+                {backups.length > 0 && (
+                  <button
+                    type="button"
+                    className="btn-ghost text-[11.5px]"
+                    onClick={() =>
+                      tap("Restaurar backup", async () => {
+                        const names = backups
+                          .map((b, idx) => `${idx + 1}. ${b.name}`)
+                          .join("\n");
+                        const pick = prompt(
+                          `Backups disponibles:\n${names}\n\nNúmero a restaurar (sobreescribe la instancia):`,
+                          "1",
+                        );
+                        const idx = Number(pick) - 1;
+                        if (!Number.isFinite(idx) || idx < 0 || idx >= backups.length) {
+                          return;
+                        }
+                        if (
+                          !confirm(
+                            `¿Restaurar “${backups[idx]!.name}” sobre “${i.name}”? Se sobrescribirán archivos.`,
+                          )
+                        ) {
+                          return;
+                        }
+                        await instanceRestoreBackup(
+                          backups[idx]!.path,
+                          i.instancePath,
+                        );
+                        await reload();
+                      })
+                    }
+                  >
+                    <IconRefresh width={13} height={13} /> Restaurar
+                  </button>
+                )}
                 <button
                   type="button"
                   className="btn-ghost text-[11.5px]"
@@ -144,6 +262,9 @@ export function InstancesPage() {
                         createdAt: new Date().toISOString(),
                         updatedAt: new Date().toISOString(),
                       };
+                      const { prepareNewInstancePaths } = await import(
+                        "../services/launchInstance"
+                      );
                       const prep = await prepareNewInstancePaths(
                         (await appPaths()).launcherRoot,
                         copy,

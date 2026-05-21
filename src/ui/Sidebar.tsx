@@ -1,8 +1,11 @@
 import { NavLink, useLocation } from "react-router-dom";
 import { motion } from "framer-motion";
+import { useEffect, useState } from "react";
 import { cx } from "./cx";
 import {
+  IconActivity,
   IconBedrock,
+  IconClock,
   IconCubes,
   IconHome,
   IconPlus,
@@ -14,36 +17,59 @@ import {
 } from "./icons";
 import type { ReactNode } from "react";
 import { isWindowsClient } from "../services/bedrock";
+import { accountsList, type AccountRow } from "../services/bridge";
+import { Avatar } from "./Avatar";
+import { getVersion } from "@tauri-apps/api/app";
 
 interface NavItem {
   to: string;
   label: string;
   icon: ReactNode;
+  badge?: string;
 }
 
-const BASE_NAV: NavItem[] = [
-  { to: "/", label: "Inicio", icon: <IconHome /> },
-  { to: "/instances", label: "Instancias", icon: <IconCubes /> },
-  { to: "/create", label: "Nueva", icon: <IconPlus /> },
-  { to: "/mods", label: "Mods", icon: <IconPuzzle /> },
-  { to: "/accounts", label: "Cuentas", icon: <IconUser /> },
-  { to: "/logs", label: "Registros", icon: <IconTerminal /> },
-  { to: "/settings", label: "Ajustes", icon: <IconSliders /> },
-];
+interface NavGroup {
+  label: string;
+  items: NavItem[];
+}
 
-// Bedrock entry is Windows-only; we keep it visually grouped with Instancias.
-function buildNav(): NavItem[] {
-  if (!isWindowsClient()) return BASE_NAV;
-  const before = BASE_NAV.slice(0, 2); // Inicio, Instancias
-  const after = BASE_NAV.slice(2);
+function buildGroups(): NavGroup[] {
+  const library: NavItem[] = [
+    { to: "/instances", label: "Instancias", icon: <IconCubes /> },
+    { to: "/create", label: "Nueva", icon: <IconPlus /> },
+    { to: "/mods", label: "Mods", icon: <IconPuzzle /> },
+  ];
+  if (isWindowsClient()) {
+    library.splice(1, 0, {
+      to: "/bedrock",
+      label: "Bedrock",
+      icon: <IconBedrock />,
+      badge: "Win",
+    });
+  }
   return [
-    ...before,
-    { to: "/bedrock", label: "Bedrock", icon: <IconBedrock /> },
-    ...after,
+    {
+      label: "Principal",
+      items: [{ to: "/", label: "Inicio", icon: <IconHome /> }],
+    },
+    { label: "Biblioteca", items: library },
+    {
+      label: "Cuenta",
+      items: [{ to: "/accounts", label: "Perfiles", icon: <IconUser /> }],
+    },
+    {
+      label: "Sistema",
+      items: [
+        { to: "/history", label: "Historial", icon: <IconClock /> },
+        { to: "/logs", label: "Registros", icon: <IconTerminal /> },
+        { to: "/diagnostics", label: "Diagnóstico", icon: <IconActivity /> },
+        { to: "/settings", label: "Ajustes", icon: <IconSliders /> },
+      ],
+    },
   ];
 }
 
-const NAV = buildNav();
+const GROUPS = buildGroups();
 
 export interface SidebarStatus {
   text: string;
@@ -56,74 +82,88 @@ interface SidebarProps {
 
 export function Sidebar({ status }: SidebarProps) {
   const loc = useLocation();
+  const [account, setAccount] = useState<AccountRow | null>(null);
+  const [version, setVersion] = useState("…");
+
+  useEffect(() => {
+    void getVersion().then(setVersion).catch(() => setVersion("0.4.0"));
+  }, []);
+
+  useEffect(() => {
+    void accountsList().then((a) =>
+      setAccount(a.find((x) => x.isActive) ?? null),
+    );
+  }, [loc.pathname]);
+
   return (
-    <aside className="relative z-10 flex w-[16rem] shrink-0 flex-col px-4 py-5">
-      <div className="glass-deep flex flex-1 flex-col overflow-hidden p-5">
-        {/* Brand */}
-        <div className="mb-6 flex items-center gap-3">
+    <aside className="relative z-10 flex w-[15.5rem] shrink-0 flex-col py-4 pl-4 pr-2">
+      <div className="sidebar-panel flex flex-1 flex-col overflow-hidden">
+        <div className="flex items-center gap-3 px-4 pt-5">
           <div className="relative shrink-0">
-            <span className="pointer-events-none absolute -inset-1.5 rounded-[18px] bg-gold-500/22 blur-md" />
-            <span className="pointer-events-none absolute -inset-px rounded-[14px] ring-1 ring-gold-500/35" />
-            <MettaMark size={44} className="relative rounded-[12px]" />
+            <span className="pointer-events-none absolute -inset-2 rounded-2xl bg-gold-500/18 blur-lg" />
+            <MettaMark size={40} className="relative rounded-[11px]" />
           </div>
-          <div className="flex min-w-0 flex-col leading-tight">
-            <span className="font-display text-[15.5px] font-bold tracking-[0.005em] text-ink">
+          <div className="min-w-0 flex-1 leading-tight">
+            <div className="font-display text-[15px] font-bold tracking-tight text-ink">
               Metta
-            </span>
-            <span className="font-display text-[10.5px] font-semibold uppercase tracking-[0.32em] text-gold-300/95">
+            </div>
+            <div className="text-[10px] font-medium uppercase tracking-[0.28em] text-gold-300/80">
               Launcher
-            </span>
+            </div>
           </div>
+          <span className="rounded-md border border-line-gold bg-gold-haze/30 px-1.5 py-0.5 font-mono text-[9px] font-semibold text-gold-200">
+            {version}
+          </span>
         </div>
 
-        <div className="mb-5 h-px w-full bg-gradient-to-r from-transparent via-line-strong to-transparent" />
-
-        {/* Nav */}
-        <nav className="flex flex-1 flex-col gap-1">
-          {NAV.map((item) => {
-            const active =
-              item.to === "/"
-                ? loc.pathname === "/"
-                : loc.pathname.startsWith(item.to);
-            return (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                className={() =>
-                  cx(
-                    "group relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-[13.5px] font-medium transition-all duration-200 ease-soft",
-                    active
-                      ? "text-ink"
-                      : "text-ink-muted hover:bg-canvas-raised/55 hover:text-ink",
-                  )
-                }
-              >
-                {active && (
-                  <motion.span
-                    layoutId="nav-active"
-                    className="absolute inset-0 -z-10 rounded-xl border border-line bg-canvas-card/85 shadow-innerline"
-                    transition={{ type: "spring", stiffness: 380, damping: 32 }}
-                  />
-                )}
-                {active && (
-                  <span className="absolute left-0 top-1/2 h-5 w-[2px] -translate-x-1 -translate-y-1/2 rounded-full bg-gradient-to-b from-gold-200 to-gold-500 shadow-[0_0_12px_2px_rgba(228,188,60,0.55)]" />
-                )}
-                <span
-                  className={cx(
-                    "flex h-4 w-4 items-center justify-center transition-colors duration-200",
-                    active ? "text-gold-300" : "text-ink-muted group-hover:text-ink",
-                  )}
-                >
-                  {item.icon}
-                </span>
-                <span className="tracking-tight">{item.label}</span>
-              </NavLink>
-            );
-          })}
+        <nav className="scrollbar-thin mt-5 flex-1 space-y-5 overflow-y-auto px-2 pb-3">
+          {GROUPS.map((group) => (
+            <div key={group.label}>
+              <div className="mb-1.5 px-2 text-[9.5px] font-semibold uppercase tracking-[0.22em] text-ink-faint/90">
+                {group.label}
+              </div>
+              <ul className="space-y-0.5">
+                {group.items.map((item) => (
+                  <NavRow key={item.to} item={item} />
+                ))}
+              </ul>
+            </div>
+          ))}
         </nav>
 
-        {/* Status footer */}
-        <div className="mt-5 border-t border-line pt-4">
+        <div className="mt-auto space-y-2.5 border-t border-line/80 px-3 py-4">
+          {account ? (
+            <NavLink
+              to="/accounts"
+              className="group flex items-center gap-2.5 rounded-xl border border-transparent px-2 py-2 transition-all duration-200 hover:border-line hover:bg-canvas-raised/50"
+            >
+              <Avatar
+                name={account.username}
+                size={34}
+                src={
+                  account.kind === "microsoft"
+                    ? `https://minotar.net/helm/${account.username}/64.png`
+                    : undefined
+                }
+              />
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-[12px] font-medium text-ink">
+                  {account.username}
+                </div>
+                <div className="truncate text-[9.5px] uppercase tracking-[0.16em] text-ink-faint">
+                  {account.kind === "microsoft" ? "Microsoft" : "Local"}
+                </div>
+              </div>
+            </NavLink>
+          ) : (
+            <NavLink
+              to="/accounts"
+              className="flex items-center gap-2 rounded-xl border border-dashed border-line/80 px-3 py-2.5 text-[11.5px] text-ink-muted transition hover:border-gold-500/30 hover:text-gold-200"
+            >
+              <IconUser width={14} height={14} />
+              Iniciar sesión
+            </NavLink>
+          )}
           <StatusBlock status={status} />
         </div>
       </div>
@@ -131,15 +171,59 @@ export function Sidebar({ status }: SidebarProps) {
   );
 }
 
+function NavRow({ item }: { item: NavItem }) {
+  const loc = useLocation();
+  const active =
+    item.to === "/"
+      ? loc.pathname === "/"
+      : loc.pathname.startsWith(item.to);
+
+  return (
+    <li>
+      <NavLink
+        to={item.to}
+        className={() =>
+          cx(
+            "nav-item group relative flex items-center gap-2.5 rounded-xl px-2.5 py-2 text-[13px] font-medium",
+            active ? "nav-item-active text-ink" : "text-ink-muted",
+          )
+        }
+      >
+        {active && (
+          <motion.span
+            layoutId="nav-active"
+            className="absolute inset-0 rounded-xl border border-line-gold/40 bg-canvas-card/90 shadow-innerline"
+            transition={{ type: "spring", stiffness: 420, damping: 34 }}
+          />
+        )}
+        <span
+          className={cx(
+            "relative z-[1] flex h-7 w-7 items-center justify-center rounded-lg border transition-colors duration-200",
+            active
+              ? "border-gold-500/35 bg-gold-haze/40 text-gold-200"
+              : "border-transparent bg-transparent text-ink-muted group-hover:border-line group-hover:bg-canvas-raised/60 group-hover:text-ink",
+          )}
+        >
+          {item.icon}
+        </span>
+        <span className="relative z-[1] flex-1 tracking-tight">{item.label}</span>
+        {item.badge && (
+          <span className="relative z-[1] rounded-md border border-line bg-canvas-deep/80 px-1.5 py-0.5 text-[8.5px] font-bold uppercase tracking-wider text-ink-faint">
+            {item.badge}
+          </span>
+        )}
+      </NavLink>
+    </li>
+  );
+}
+
 function StatusBlock({ status }: { status?: SidebarStatus }) {
   if (!status || status.variant === "idle") {
     return (
-      <div className="flex items-center gap-2.5 px-1">
-        <span className="relative flex h-2 w-2">
-          <span className="absolute inset-0 rounded-full bg-ink-dim" />
-        </span>
-        <span className="text-[11px] font-medium uppercase tracking-[0.18em] text-ink-faint">
-          En reposo
+      <div className="flex items-center gap-2 px-1 py-0.5">
+        <span className="h-1.5 w-1.5 rounded-full bg-ink-dim" />
+        <span className="text-[10px] font-medium uppercase tracking-[0.18em] text-ink-faint">
+          Listo
         </span>
       </div>
     );
@@ -157,20 +241,20 @@ function StatusBlock({ status }: { status?: SidebarStatus }) {
         ? "bg-red-400"
         : "bg-gold-400";
   return (
-    <div className="flex items-center gap-2.5 px-1">
-      <span className="relative flex h-2 w-2">
+    <div className="rounded-xl border border-line/60 bg-canvas-deep/50 px-2.5 py-2">
+      <div className="flex items-center gap-2">
+        <span className="relative flex h-2 w-2 shrink-0">
+          <span
+            className={cx(
+              "absolute inset-0 animate-ping rounded-full opacity-50",
+              dotBg,
+            )}
+          />
+          <span className={cx("relative h-2 w-2 rounded-full", dotBg)} />
+        </span>
         <span
           className={cx(
-            "absolute inset-0 animate-ping rounded-full opacity-60",
-            dotBg,
-          )}
-        />
-        <span className={cx("relative h-2 w-2 rounded-full", dotBg)} />
-      </span>
-      <div className="flex min-w-0 flex-col">
-        <span
-          className={cx(
-            "text-[10.5px] font-semibold uppercase tracking-[0.2em]",
+            "text-[9.5px] font-semibold uppercase tracking-[0.18em]",
             tone,
           )}
         >
@@ -180,10 +264,8 @@ function StatusBlock({ status }: { status?: SidebarStatus }) {
               ? "Error"
               : "Procesando"}
         </span>
-        <span className="truncate text-[11.5px] font-medium text-ink-soft">
-          {status.text}
-        </span>
       </div>
+      <p className="mt-1 truncate pl-4 text-[11px] text-ink-soft">{status.text}</p>
     </div>
   );
 }

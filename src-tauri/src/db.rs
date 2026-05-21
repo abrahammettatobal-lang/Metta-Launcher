@@ -521,6 +521,30 @@ pub fn account_insert(db: &Db, row: &AccountRow) -> Result<(), String> {
   Ok(())
 }
 
+pub fn account_upsert(db: &Db, row: &AccountRow) -> Result<(), String> {
+  let conn = db.conn.lock().map_err(|e| e.to_string())?;
+  conn
+    .execute(
+      "INSERT INTO accounts(id, kind, username, uuid, is_active, created_at, updated_at)
+       VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7)
+       ON CONFLICT(id) DO UPDATE SET
+         username = excluded.username,
+         uuid = excluded.uuid,
+         updated_at = excluded.updated_at",
+      params![
+        row.id,
+        row.kind,
+        row.username,
+        row.uuid,
+        if row.is_active { 1 } else { 0 },
+        row.created_at,
+        row.updated_at,
+      ],
+    )
+    .map_err(|e| e.to_string())?;
+  Ok(())
+}
+
 pub fn downloads_upsert(
   db: &Db,
   id: &str,

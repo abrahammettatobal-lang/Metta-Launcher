@@ -1,23 +1,21 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import {
   accountAddOffline,
   accountDelete,
+  accountLogout,
   accountSetActive,
   accountsList,
   applyMicrosoftSkin,
   instancesList,
+  logAppend,
   microsoftDevicePoll,
   microsoftDeviceStart,
   resetMicrosoftSkin,
   resolveMinecraftSkin,
 } from "../services/bridge";
-import type {
-  AccountRow,
-  InstanceRow,
-  ResolvedSkin,
-} from "../services/bridge";
+import type { AccountRow, InstanceRow, ResolvedSkin } from "../services/bridge";
 import { applySkinAsResourcePack } from "../services/minecraft/skinManager";
 import { Topbar } from "../ui/Topbar";
 import { Card } from "../ui/Card";
@@ -27,14 +25,21 @@ import { Empty } from "../ui/Empty";
 import {
   IconCheck,
   IconLink,
+  IconLoader,
   IconShield,
   IconTrash,
   IconUser,
   IconX,
 } from "../ui/icons";
-import { tap } from "../utils/tap";
+import { tap, toastOk } from "../utils/tap";
 import { cx } from "../ui/cx";
 import { relativeTime } from "../utils/format";
+
+interface AuthLog {
+  at: string;
+  level: "info" | "warn" | "error";
+  message: string;
+}
 
 export function AccountsPage() {
   const [rows, setRows] = useState<AccountRow[]>([]);
@@ -43,7 +48,11 @@ export function AccountsPage() {
     userCode: string;
     uri: string;
     deviceCode: string;
+    interval: number;
   } | null>(null);
+  const [msBusy, setMsBusy] = useState(false);
+  const [authLogs, setAuthLogs] = useState<AuthLog[]>([]);
+  const pollRef = useRef(false);
 
   const [instances, setInstances] = useState<InstanceRow[]>([]);
   const [skinName, setSkinName] = useState("");
@@ -56,6 +65,13 @@ export function AccountsPage() {
   const activeAccount = useMemo(() => rows.find((r) => r.isActive), [rows]);
   const trimmedName = skinName.trim();
 
+  const pushAuthLog = useCallback((level: AuthLog["level"], message: string) => {
+    setAuthLogs((prev) =>
+      [{ at: new Date().toISOString(), level, message }, ...prev].slice(0, 8),
+    );
+    void logAppend("auth", level, message);
+  }, []);
+
   const load = useCallback(async () => {
     const [accs, ins] = await Promise.all([accountsList(), instancesList()]);
     setRows(accs);
@@ -67,6 +83,9 @@ export function AccountsPage() {
 
   useEffect(() => {
     void load();
+    return () => {
+      pollRef.current = false;
+    };
   }, [load]);
 
   useEffect(() => {
@@ -125,7 +144,6 @@ export function AccountsPage() {
     return [
       `https://api.mineatar.io/body/full/${resolved.uuid}?scale=8`,
       `https://mc-heads.net/body/${uuidWithDashes}/right`,
-      `https://crafatar.com/renders/body/${uuidWithDashes}?overlay&scale=8`,
     ];
   }, [resolved, uuidWithDashes]);
 
@@ -137,18 +155,140 @@ export function AccountsPage() {
     setRemoteFailed(false);
   }, [resolved?.uuid]);
 
+  const cancelPoll = () => {
+    pollRef.current = false;
+    setDc(null);
+    setMsBusy(false);
+    pushAuthLog("info", "Inicio de sesión cancelado.");
+  };
+
+  const startMicrosoftLogin = () =>
+    tap("Microsoft", async () => {
+      pollRef.current = false;
+      setMsBusy(true);
+      pushAuthLog("info", "Solicitando código de dispositivo…");
+      try {
+        const s = await microsoftDeviceStart();
+        setDc({
+          userCode: s.userCode,
+          uri: s.verificationUri,
+          deviceCode: s.deviceCode,
+          interval: s.interval || 5,
+        });
+        pushAuthLog("info", `Código generado: ${s.userCode}`);
+        try {
+          await openUrl(s.verificationUri);
+          pushAuthLog("info", "Navegador abierto para autorizar.");
+        } catch {
+          pushAuthLog("warn", "No se pudo abrir el navegador. Usa el enlace manual.");
+        }
+        pollRef.current = true;
+        const tick = async () => {
+          if (!pollRef.current) return;
+          try {
+            const r = await microsoftDevicePoll(s.deviceCode);
+            if (r.kind === "success") {
+              pollRef.current = false;
+              setDc(null);
+              pushAuthLog("info", `Sesión iniciada como ${r.username}.`);
+              toastOk("Sesión iniciada", r.username);
+              await load();
+              setMsBusy(false);
+            } else if (r.kind === "error") {
+              pollRef.current = false;
+              setDc(null);
+              pushAuthLog("error", r.message);
+              setMsBusy(false);
+            } else {
+              setTimeout(tick, (s.interval || 5) * 1000);
+            }
+          } catch (e) {
+            pollRef.current = false;
+            setDc(null);
+            pushAuthLog("error", String(e));
+            setMsBusy(false);
+          }
+        };
+        setTimeout(tick, (s.interval || 5) * 1000);
+      } catch (e) {
+        pushAuthLog("error", String(e));
+        setMsBusy(false);
+      }
+    });
+
   return (
     <div className="space-y-6">
       <Topbar
         eyebrow="Cuentas"
-        title="Tus identidades de juego"
-        subtitle="Inicia con Microsoft para servidores Premium o usa una cuenta local."
+        title="Identidad de juego"
+        subtitle="Microsoft para servidores Premium o perfil local para modo offline."
       />
+
+      {activeAccount && (
+        <Card padding="none" className="overflow-hidden">
+          <div className="relative flex flex-col gap-4 p-6 sm:flex-row sm:items-center">
+            <div className="pointer-events-none absolute -right-16 -top-16 h-48 w-48 rounded-full bg-gold-500/12 blur-3xl" />
+            <Avatar
+              name={activeAccount.username}
+              src={
+                activeAccount.kind === "microsoft"
+                  ? `https://minotar.net/body/${activeAccount.username}/128.png`
+                  : undefined
+              }
+              size={72}
+            />
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="font-display text-xl font-bold tracking-tight text-ink">
+                  {activeAccount.username}
+                </h2>
+                <span className="pill-gold">activa</span>
+                <span className="pill">
+                  {activeAccount.kind === "microsoft" ? "Microsoft" : "Local"}
+                </span>
+              </div>
+              <p className="mt-1 truncate font-mono text-[11px] text-ink-faint">
+                {activeAccount.uuid}
+              </p>
+              <p className="mt-2 text-[12px] text-ink-muted">
+                Sesión lista para lanzar instancias.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {activeAccount.kind === "microsoft" && (
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={msBusy}
+                  onClick={() => startMicrosoftLogin()}
+                >
+                  Cambiar cuenta
+                </button>
+              )}
+              {activeAccount.kind === "microsoft" && (
+                <button
+                  type="button"
+                  className="btn-danger"
+                  onClick={() =>
+                    tap("Cerrar sesión", async () => {
+                      await accountLogout(activeAccount.id);
+                      pushAuthLog("info", "Sesión Microsoft cerrada.");
+                      await load();
+                    })
+                  }
+                >
+                  Cerrar sesión
+                </button>
+              )}
+            </div>
+          </div>
+        </Card>
+      )}
 
       <div className="grid gap-5 lg:grid-cols-2">
         <Card
           eyebrow="Premium"
-          title="Iniciar sesión con Microsoft"
+          title="Microsoft"
           action={
             <span className="pill-gold">
               <IconShield width={11} height={11} /> Recomendado
@@ -156,37 +296,24 @@ export function AccountsPage() {
           }
         >
           <p className="text-[12.5px] leading-relaxed text-ink-muted">
-            Recibirás un código corto que deberás introducir en{" "}
+            Autoriza en{" "}
             <span className="font-mono text-ink-soft">microsoft.com/link</span>.
-            Las credenciales se almacenan en el llavero del sistema.
+            Las credenciales se guardan en el llavero del sistema, nunca la
+            contraseña.
           </p>
           <motion.button
             type="button"
             whileTap={{ scale: 0.99 }}
             className="btn-gold mt-4"
-            onClick={() =>
-              tap("Microsoft", async () => {
-                const s = await microsoftDeviceStart();
-                setDc({
-                  userCode: s.userCode,
-                  uri: s.verificationUri,
-                  deviceCode: s.deviceCode,
-                });
-                const tick = async () => {
-                  const r = await microsoftDevicePoll(s.deviceCode);
-                  if (r.kind === "success") {
-                    setDc(null);
-                    await load();
-                  } else if (r.kind === "error") {
-                    alert(r.message);
-                    setDc(null);
-                  } else setTimeout(tick, (s.interval || 5) * 1000);
-                };
-                setTimeout(tick, (s.interval || 5) * 1000);
-              })
-            }
+            disabled={msBusy}
+            onClick={() => startMicrosoftLogin()}
           >
-            <IconUser width={14} height={14} /> Iniciar con Microsoft
+            {msBusy ? (
+              <IconLoader width={14} height={14} className="animate-spin" />
+            ) : (
+              <IconUser width={14} height={14} />
+            )}
+            {msBusy ? "Esperando autorización…" : "Iniciar con Microsoft"}
           </motion.button>
 
           {dc && (
@@ -202,32 +329,55 @@ export function AccountsPage() {
                 {dc.userCode}
               </div>
               <div className="mt-4 flex flex-wrap items-center justify-between gap-2 text-[12px] text-ink-muted">
-                <span>
-                  Abre el enlace y pega el código para autorizar la cuenta.
-                </span>
+                <span>Introduce el código en el navegador para continuar.</span>
                 <button
                   type="button"
                   className="btn-ghost !text-gold-300 hover:!text-gold-200"
                   onClick={() => tap("Abrir enlace", async () => openUrl(dc.uri))}
                 >
-                  <IconLink width={13} height={13} /> {dc.uri}
+                  <IconLink width={13} height={13} /> Abrir enlace
                 </button>
               </div>
               <button
                 type="button"
-                onClick={() => setDc(null)}
+                onClick={cancelPoll}
                 className="btn-ghost mt-2 !text-ink-faint hover:!text-ink"
               >
                 <IconX width={12} height={12} /> Cancelar
               </button>
             </motion.div>
           )}
+
+          {authLogs.length > 0 && (
+            <div className="mt-4 rounded-xl border border-line bg-canvas-deep/50 p-3">
+              <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-ink-faint">
+                Registro de autenticación
+              </div>
+              <ul className="space-y-1">
+                {authLogs.map((l) => (
+                  <li
+                    key={l.at + l.message}
+                    className={cx(
+                      "font-mono text-[10.5px]",
+                      l.level === "error"
+                        ? "text-red-300"
+                        : l.level === "warn"
+                          ? "text-amber-200"
+                          : "text-ink-muted",
+                    )}
+                  >
+                    {new Date(l.at).toLocaleTimeString("es")} · {l.message}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </Card>
 
         <Card eyebrow="Local" title="Cuenta offline">
           <p className="text-[12.5px] leading-relaxed text-ink-muted">
-            Útil para servidores en modo offline o partidas en solitario sin
-            verificación.
+            Para servidores offline o partidas en solitario sin verificación
+            Premium.
           </p>
           <div className="mt-4 flex flex-col gap-2 sm:flex-row">
             <Field
@@ -244,6 +394,7 @@ export function AccountsPage() {
                 tap("Cuenta offline", async () => {
                   await accountAddOffline(off);
                   setOff("");
+                  toastOk("Cuenta local añadida", off.trim());
                   await load();
                 })
               }
@@ -254,12 +405,12 @@ export function AccountsPage() {
         </Card>
       </div>
 
-      <Card eyebrow="Tus cuentas" title="Gestionar">
+      <Card eyebrow="Perfiles" title="Todas las cuentas">
         {rows.length === 0 ? (
           <Empty
             icon={<IconUser width={22} height={22} />}
-            title="Aún no tienes cuentas"
-            description="Inicia sesión con Microsoft o crea una cuenta local arriba."
+            title="Sin cuentas"
+            description="Inicia sesión con Microsoft o crea un perfil local."
           />
         ) : (
           <ul className="divide-y divide-line">
@@ -290,14 +441,12 @@ export function AccountsPage() {
                           : "border-line bg-canvas-raised text-ink-muted",
                       )}
                     >
-                      {a.kind}
+                      {a.kind === "microsoft" ? "Microsoft" : "Local"}
                     </span>
-                    {a.isActive && (
-                      <span className="pill-gold">activa</span>
-                    )}
+                    {a.isActive && <span className="pill-gold">activa</span>}
                   </div>
                   <div className="mt-0.5 truncate font-mono text-[10.5px] text-ink-faint">
-                    {a.uuid} · creada {relativeTime(a.createdAt)}
+                    {a.uuid} · {relativeTime(a.createdAt)}
                   </div>
                 </div>
                 <div className="flex gap-2">
@@ -320,8 +469,7 @@ export function AccountsPage() {
                     className="btn-danger"
                     onClick={() =>
                       tap("Eliminar cuenta", async () => {
-                        if (!confirm(`¿Eliminar la cuenta "${a.username}"?`))
-                          return;
+                        if (a.kind === "microsoft") await accountLogout(a.id);
                         await accountDelete(a.id);
                         await load();
                       })
@@ -336,20 +484,10 @@ export function AccountsPage() {
         )}
       </Card>
 
-      <Card
-        eyebrow="Personalización"
-        title="Selector de skin"
-        action={
-          <span className="text-[10.5px] uppercase tracking-[0.18em] text-ink-faint">
-            Fuente · sessionserver.mojang.com
-          </span>
-        }
-      >
+      <Card eyebrow="Personalización" title="Selector de skin">
         <p className="text-[12.5px] leading-relaxed text-ink-muted">
-          Busca cualquier jugador real (Premium o histórico). La skin se
-          obtiene directamente de Mojang en formato canónico 64×64, así que
-          se ve igual que en el juego. El modelo (clásico o slim) se detecta
-          automáticamente del perfil.
+          Busca un jugador Premium y aplica su skin a tu cuenta Microsoft o a
+          un resource pack local para cuentas offline.
         </p>
 
         <div className="mt-5 grid gap-5 lg:grid-cols-[260px,1fr]">
@@ -384,7 +522,7 @@ export function AccountsPage() {
                     {resolved.name}
                   </div>
                   <div className="mt-1 inline-flex items-center gap-1.5 rounded-md border border-gold-500/30 bg-gold-haze/40 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-gold-200">
-                    Modelo {resolved.model === "slim" ? "Slim (3px)" : "Classic (4px)"}
+                    Modelo {resolved.model === "slim" ? "Slim" : "Classic"}
                   </div>
                 </div>
               </>
@@ -402,7 +540,7 @@ export function AccountsPage() {
           <div className="flex flex-col gap-4">
             <Field
               label="Nombre de jugador"
-              placeholder="Ej. Notch, Dream, MrBeast…"
+              placeholder="Nombre en Mojang"
               value={skinName}
               onChange={(e) => setSkinName(e.target.value)}
             />
@@ -411,30 +549,6 @@ export function AccountsPage() {
               <div className="text-[10.5px] font-semibold uppercase tracking-[0.22em] text-gold-300">
                 Cuenta Microsoft
               </div>
-              <p className="mt-1 text-[12px] text-ink-muted">
-                {activeAccount && activeAccount.kind === "microsoft" ? (
-                  <>
-                    Se aplicará permanentemente a{" "}
-                    <span className="font-semibold text-ink">
-                      {activeAccount.username}
-                    </span>
-                    {resolved ? (
-                      <>
-                        {" "}
-                        usando el modelo{" "}
-                        <span className="font-semibold text-ink">
-                          {resolved.model}
-                        </span>
-                        .
-                      </>
-                    ) : (
-                      "."
-                    )}
-                  </>
-                ) : (
-                  <>Activa una cuenta Microsoft arriba para cambiar tu skin real.</>
-                )}
-              </p>
               <div className="mt-3 flex flex-wrap gap-2">
                 <button
                   type="button"
@@ -455,16 +569,14 @@ export function AccountsPage() {
                           skinUrl: resolved.skinUrl,
                           variant: resolved.model,
                         });
-                        alert(
-                          `Skin de ${resolved.name} aplicada a tu cuenta Microsoft.`,
-                        );
+                        toastOk("Skin aplicada", resolved.name);
                       } finally {
                         setSkinBusy(false);
                       }
                     })
                   }
                 >
-                  <IconCheck width={13} height={13} /> Aplicar a Microsoft
+                  Aplicar a Microsoft
                 </button>
                 <button
                   type="button"
@@ -477,31 +589,25 @@ export function AccountsPage() {
                   onClick={() =>
                     tap("Restablecer skin", async () => {
                       if (!activeAccount) return;
-                      if (!confirm("¿Restablecer la skin por defecto?")) return;
                       setSkinBusy(true);
                       try {
                         await resetMicrosoftSkin(activeAccount.id);
-                        alert("Skin restablecida.");
+                        toastOk("Skin restablecida");
                       } finally {
                         setSkinBusy(false);
                       }
                     })
                   }
                 >
-                  <IconX width={13} height={13} /> Restablecer
+                  Restablecer
                 </button>
               </div>
             </div>
 
             <div className="rounded-2xl border border-line bg-canvas-raised/60 p-4">
               <div className="text-[10.5px] font-semibold uppercase tracking-[0.22em] text-ink-soft">
-                Resource pack local (cuentas offline)
+                Resource pack local (offline)
               </div>
-              <p className="mt-1 text-[12px] text-ink-muted">
-                Reemplaza la textura por defecto en una instancia. Sólo es
-                visible para ti en partidas offline o servidores propios; en
-                servidores Premium cada jugador ve su skin real.
-              </p>
               <div className="mt-3 grid gap-2 sm:grid-cols-[1fr,auto]">
                 <FieldSelect
                   value={skinInstance}
@@ -533,16 +639,14 @@ export function AccountsPage() {
                           bytes,
                           resolved.model,
                         );
-                        alert(
-                          `Skin de ${resolved.name} instalada en "${ins.name}". Si Minecraft ya estaba abierto, reinícialo para verla.`,
-                        );
+                        toastOk("Skin instalada en instancia", ins.name);
                       } finally {
                         setSkinBusy(false);
                       }
                     })
                   }
                 >
-                  <IconCheck width={13} height={13} /> Aplicar al pack
+                  Aplicar al pack
                 </button>
               </div>
             </div>

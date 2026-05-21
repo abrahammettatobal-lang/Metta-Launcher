@@ -233,7 +233,7 @@ async function runLaunchPipeline(instanceId: string): Promise<void> {
     auth_player_name: session.username,
     auth_uuid: uuid,
     auth_access_token: session.accessToken,
-    auth_xuid: "",
+    auth_xuid: session.xuid ?? "",
     version_type: versionType,
     user_type: session.userType,
     version_name: merged.id,
@@ -241,7 +241,7 @@ async function runLaunchPipeline(instanceId: string): Promise<void> {
     assets_root: abs(root, "shared/assets"),
     assets_index_name: merged.assetIndex?.id ?? "legacy",
     launcher_name: "MettaLauncher",
-    launcher_version: "0.1.0",
+    launcher_version: "0.4.0",
     classpath,
     library_directory: abs(root, "shared/libraries"),
     natives_directory: abs(root, nativesRel),
@@ -276,6 +276,7 @@ async function runLaunchPipeline(instanceId: string): Promise<void> {
     cwd: rep.game_directory,
     args: argv,
     env: [["METTA_LAUNCHER", "1"]],
+    instanceId: inst.id,
   });
   progressRunning();
 

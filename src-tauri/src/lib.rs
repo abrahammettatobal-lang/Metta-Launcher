@@ -7,6 +7,7 @@ mod download;
 mod game;
 mod java;
 mod paths;
+mod system;
 
 use chrono::Utc;
 use db::{AccountRow, Db, InstanceRow, LogRow};
@@ -243,10 +244,14 @@ pub struct LaunchSession {
   pub uuid: String,
   pub username: String,
   pub user_type: String,
+  pub xuid: String,
 }
 
 #[tauri::command]
-fn get_launch_session(state: State<'_, AppState>, account_id: String) -> Result<LaunchSession, String> {
+async fn get_launch_session(
+  state: State<'_, AppState>,
+  account_id: String,
+) -> Result<LaunchSession, String> {
   let accounts = db::accounts_list(&state.db)?;
   let acc = accounts
     .into_iter()
@@ -258,16 +263,40 @@ fn get_launch_session(state: State<'_, AppState>, account_id: String) -> Result<
       uuid: acc.uuid,
       username: acc.username,
       user_type: "legacy".into(),
+      xuid: String::new(),
     });
   }
-  let secrets = auth::keyring_get_minecraft(&account_id)?
-    .ok_or_else(|| "No hay credenciales de Microsoft guardadas para esta cuenta.".to_string())?;
+  let secrets = auth::ensure_valid_secrets(&state.http, &state.db, &account_id).await?;
   Ok(LaunchSession {
     access_token: secrets.minecraft_access_token,
     uuid: acc.uuid,
     username: acc.username,
     user_type: "msa".into(),
+    xuid: secrets.xuid.unwrap_or_default(),
   })
+}
+
+#[tauri::command]
+fn account_logout(state: State<'_, AppState>, account_id: String) -> Result<(), String> {
+  auth::keyring_delete_minecraft(&account_id)?;
+  let accounts = db::accounts_list(&state.db)?;
+  if accounts.iter().any(|a| a.id == account_id && a.is_active) {
+    let others: Vec<_> = accounts.iter().filter(|a| a.id != account_id).collect();
+    if let Some(next) = others.first() {
+      db::account_set_active(&state.db, &next.id)?;
+    }
+  }
+  Ok(())
+}
+
+#[tauri::command(rename_all = "camelCase")]
+fn instance_touch_last_played(state: State<'_, AppState>, id: String) -> Result<(), String> {
+  state.db.instance_touch_last_played(&id)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+fn launch_history_list(state: State<'_, AppState>, limit: i64) -> Result<Vec<system::LaunchHistoryRow>, String> {
+  system::launch_history_list(&state.db, limit)
 }
 
 #[tauri::command]
@@ -290,20 +319,55 @@ async fn microsoft_device_poll(
   } = outcome
   {
     let now = Utc::now().to_rfc3339();
-    let row = AccountRow {
-      id: account_id.clone(),
-      kind: "microsoft".into(),
-      username: username.clone(),
-      uuid: uuid.clone(),
-      is_active: false,
-      created_at: now.clone(),
-      updated_at: now,
+    let formatted_uuid = auth::format_uuid(uuid);
+    let secrets = auth::keyring_get_minecraft(account_id)?
+      .ok_or_else(|| "No se pudieron guardar las credenciales.".to_string())?;
+
+    let existing = db::accounts_list(&state.db)?
+      .into_iter()
+      .find(|a| {
+        a.kind == "microsoft"
+          && a.uuid.replace('-', "") == formatted_uuid.replace('-', "")
+      });
+
+    let final_id = if let Some(acc) = existing {
+      auth::keyring_store_minecraft(&acc.id, &secrets)?;
+      auth::keyring_delete_minecraft(account_id)?;
+      let row = AccountRow {
+        id: acc.id.clone(),
+        kind: "microsoft".into(),
+        username: username.clone(),
+        uuid: formatted_uuid,
+        is_active: acc.is_active,
+        created_at: acc.created_at,
+        updated_at: now,
+      };
+      db::account_upsert(&state.db, &row)?;
+      acc.id
+    } else {
+      let row = AccountRow {
+        id: account_id.clone(),
+        kind: "microsoft".into(),
+        username: username.clone(),
+        uuid: formatted_uuid,
+        is_active: false,
+        created_at: now.clone(),
+        updated_at: now,
+      };
+      db::account_insert(&state.db, &row)?;
+      account_id.clone()
     };
-    db::account_insert(&state.db, &row)?;
+
     let list = db::accounts_list(&state.db)?;
-    if list.len() == 1 {
-      db::account_set_active(&state.db, account_id)?;
+    if list.iter().filter(|a| a.is_active).count() == 0 {
+      db::account_set_active(&state.db, &final_id)?;
     }
+
+    return Ok(auth::MicrosoftAuthOutcome::Success {
+      account_id: final_id,
+      username: username.clone(),
+      uuid: auth::format_uuid(uuid),
+    });
   }
   Ok(outcome)
 }
@@ -489,14 +553,27 @@ pub struct SpawnLaunchRequest {
   pub cwd: String,
   pub args: Vec<String>,
   pub env: Vec<(String, String)>,
+  pub instance_id: Option<String>,
 }
 
 #[tauri::command]
-fn spawn_java_game(app: AppHandle, req: SpawnLaunchRequest) -> Result<(), String> {
+fn spawn_java_game(
+  app: AppHandle,
+  state: State<'_, AppState>,
+  req: SpawnLaunchRequest,
+) -> Result<(), String> {
   let cwd = PathBuf::from(&req.cwd);
   std::fs::create_dir_all(&cwd).map_err(|e| e.to_string())?;
+  let history_id = if let Some(ref id) = req.instance_id {
+    let _ = state.db.instance_touch_last_played(id);
+    state.db.launch_history_insert_start(id).ok()
+  } else {
+    None
+  };
   game::spawn_game_process(
     app,
+    state.db.clone(),
+    history_id,
     req.java_path,
     req.args,
     req.cwd,
@@ -524,6 +601,9 @@ fn remove_dir_recursive(state: State<'_, AppState>, path: String) -> Result<(), 
 pub fn run() {
   tauri::Builder::default()
     .plugin(tauri_plugin_opener::init())
+    .plugin(tauri_plugin_dialog::init())
+    .plugin(tauri_plugin_updater::Builder::new().build())
+    .plugin(tauri_plugin_process::init())
     .setup(|app| {
       let resolver = app.path();
       let app_data = resolver.app_data_dir().expect("app data dir");
@@ -532,7 +612,7 @@ pub fn run() {
       let db = Arc::new(Db::open(&db_path).expect("db open"));
       ensure_folders_and_defaults(&db).expect("bootstrap folders and defaults");
       let http = reqwest::Client::builder()
-        .user_agent("MettaLauncher/0.1 (+https://localhost)")
+        .user_agent("MettaLauncher/0.4 (+https://metta-launcher.vercel.app)")
         .build()
         .expect("http client");
       app.manage(AppState { db, http });
@@ -581,9 +661,95 @@ pub fn run() {
       apply_microsoft_skin,
       reset_microsoft_skin,
       resolve_minecraft_skin,
+      account_logout,
+      instance_touch_last_played,
+      launch_history_list,
+      system_diagnose,
+      network_check,
+      cache_clear,
+      instance_repair,
+      instance_backup,
+      launcher_check_update,
+      recommended_java,
+      mod_parse_metadata,
+      backups_list,
+      instance_restore_backup,
+      instance_import_zip,
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
+}
+
+#[tauri::command]
+fn system_diagnose(app: AppHandle, state: State<'_, AppState>) -> Result<system::SystemDiagnostic, String> {
+  let app_data = app.path().app_data_dir().map_err(|e| e.to_string())?;
+  Ok(system::collect_diagnostics(&state.db, &app_data))
+}
+
+#[tauri::command]
+async fn network_check(state: State<'_, AppState>) -> Result<Vec<system::NetworkEndpoint>, String> {
+  Ok(system::check_network(&state.http).await)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+fn cache_clear(state: State<'_, AppState>, include_old_logs: bool) -> Result<system::CacheClearResult, String> {
+  system::clear_cache(&state.db, include_old_logs)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+fn instance_repair(
+  state: State<'_, AppState>,
+  instance_path: String,
+  minecraft_version: String,
+) -> Result<system::RepairReport, String> {
+  Ok(system::repair_instance(&state.db, &instance_path, &minecraft_version))
+}
+
+#[tauri::command(rename_all = "camelCase")]
+fn instance_backup(
+  state: State<'_, AppState>,
+  instance_path: String,
+  name: String,
+) -> Result<system::BackupInfo, String> {
+  system::create_instance_backup(&state.db, &instance_path, &name)
+}
+
+#[tauri::command]
+async fn launcher_check_update(state: State<'_, AppState>) -> Result<system::LauncherUpdateInfo, String> {
+  Ok(system::check_launcher_update(&state.http).await)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+fn recommended_java(minecraft_version: String) -> u8 {
+  system::recommended_java_major(&minecraft_version)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+fn mod_parse_metadata(jar_path: String) -> Result<system::ModMetadata, String> {
+  Ok(system::parse_mod_jar(Path::new(&jar_path)))
+}
+
+#[tauri::command]
+fn backups_list(state: State<'_, AppState>) -> Result<Vec<system::BackupListItem>, String> {
+  system::list_backups(&state.db)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+fn instance_restore_backup(
+  state: State<'_, AppState>,
+  zip_path: String,
+  instance_path: String,
+) -> Result<(), String> {
+  system::restore_instance_backup(&state.db, &zip_path, &instance_path)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+fn instance_import_zip(
+  state: State<'_, AppState>,
+  zip_path: String,
+  folder_name: String,
+) -> Result<String, String> {
+  system::import_instance_zip(&state.db, &zip_path, &folder_name)
 }
 
 // ─── Bedrock (Windows-only at runtime; commands are always registered so the
@@ -649,7 +815,7 @@ async fn resolve_minecraft_skin(
   let lookup_res = state
     .http
     .get(&lookup_url)
-    .header("User-Agent", "MettaLauncher/0.3")
+    .header("User-Agent", "MettaLauncher/0.4")
     .send()
     .await
     .map_err(|e| format!("Mojang lookup: {e}"))?;
@@ -680,7 +846,7 @@ async fn resolve_minecraft_skin(
   let profile: serde_json::Value = state
     .http
     .get(&profile_url)
-    .header("User-Agent", "MettaLauncher/0.3")
+    .header("User-Agent", "MettaLauncher/0.4")
     .send()
     .await
     .map_err(|e| format!("Mojang session: {e}"))?
@@ -725,7 +891,7 @@ async fn resolve_minecraft_skin(
   let bytes = state
     .http
     .get(&skin_url)
-    .header("User-Agent", "MettaLauncher/0.3")
+    .header("User-Agent", "MettaLauncher/0.4")
     .send()
     .await
     .map_err(|e| format!("Descarga de skin: {e}"))?
@@ -752,8 +918,7 @@ async fn apply_microsoft_skin(
   skin_url: String,
   variant: String,
 ) -> Result<(), String> {
-  let secrets = auth::keyring_get_minecraft(&account_id)?
-    .ok_or_else(|| "Esta cuenta no es Microsoft o no tiene token guardado.".to_string())?;
+  let secrets = auth::ensure_valid_secrets(&state.http, &state.db, &account_id).await?;
 
   let variant = match variant.to_lowercase().as_str() {
     "slim" => "slim",
@@ -763,7 +928,7 @@ async fn apply_microsoft_skin(
   let bytes = state
     .http
     .get(&skin_url)
-    .header("User-Agent", "MettaLauncher/0.3")
+    .header("User-Agent", "MettaLauncher/0.4")
     .send()
     .await
     .map_err(|e| format!("Descarga de skin: {e}"))?
@@ -803,8 +968,7 @@ async fn reset_microsoft_skin(
   state: State<'_, AppState>,
   account_id: String,
 ) -> Result<(), String> {
-  let secrets = auth::keyring_get_minecraft(&account_id)?
-    .ok_or_else(|| "Esta cuenta no es Microsoft o no tiene token guardado.".to_string())?;
+  let secrets = auth::ensure_valid_secrets(&state.http, &state.db, &account_id).await?;
 
   let res = state
     .http

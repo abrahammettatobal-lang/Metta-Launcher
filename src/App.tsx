@@ -9,6 +9,11 @@ import { AccountsPage } from "./pages/AccountsPage";
 import { LogsPage } from "./pages/LogsPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { BedrockPage } from "./pages/BedrockPage";
+import { DiagnosticsPage } from "./pages/DiagnosticsPage";
+import { EditInstancePage } from "./pages/EditInstancePage";
+import { HistoryPage } from "./pages/HistoryPage";
+import { OnboardingGate } from "./pages/OnboardingGate";
+import { PageTransition } from "./ui/PageTransition";
 import {
   subscribeLaunchProgress,
   type LaunchProgress,
@@ -45,16 +50,20 @@ function Shell() {
   const status = deriveStatus(progress);
 
   return (
-    <div className="flex h-full min-h-0 flex-1 flex-row">
-      <Sidebar status={status} />
-      <main className="relative flex min-h-0 min-w-0 flex-1 flex-col">
-        <div className="scrollbar-thin relative min-h-0 flex-1 overflow-y-auto px-6 pb-12 pt-6 lg:px-10 lg:pt-8">
-          <div className="mx-auto w-full max-w-[1320px]">
-            <Outlet />
+    <OnboardingGate>
+      <div className="flex h-full min-h-0 flex-1 flex-row">
+        <Sidebar status={status} />
+        <main className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+          <div className="scrollbar-thin relative min-h-0 flex-1 overflow-y-auto px-6 pb-12 pt-6 lg:px-10 lg:pt-8">
+            <div className="mx-auto w-full max-w-[1280px]">
+              <PageTransition>
+                <Outlet />
+              </PageTransition>
+            </div>
           </div>
-        </div>
-      </main>
-    </div>
+        </main>
+      </div>
+    </OnboardingGate>
   );
 }
 
@@ -81,6 +90,9 @@ export function App() {
         <Route path="accounts" element={<AccountsPage />} />
         <Route path="logs" element={<LogsPage />} />
         <Route path="settings" element={<SettingsPage />} />
+        <Route path="diagnostics" element={<DiagnosticsPage />} />
+        <Route path="history" element={<HistoryPage />} />
+        <Route path="instances/:id/edit" element={<EditInstancePage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

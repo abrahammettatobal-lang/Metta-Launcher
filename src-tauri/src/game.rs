@@ -1,7 +1,9 @@
+use crate::db::Db;
 use serde::Serialize;
 use std::io::{BufRead, BufReader};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Arc;
 use tauri::AppHandle;
 use tauri::Emitter;
 
@@ -43,6 +45,8 @@ pub fn stop_game_process() -> Result<(), String> {
 
 pub fn spawn_game_process(
   app: AppHandle,
+  db: Arc<Db>,
+  history_id: Option<i64>,
   java: String,
   args: Vec<String>,
   cwd: String,
@@ -104,6 +108,9 @@ pub fn spawn_game_process(
     RUNNING_PID.store(0, Ordering::SeqCst);
     let code = status.as_ref().and_then(|s| s.code());
     let success = status.map(|s| s.success()).unwrap_or(false);
+    if let Some(hid) = history_id {
+      let _ = db.launch_history_finish(hid, code, success);
+    }
     let _ = app_wait.emit(
       "game-exit",
       GameExitPayload {

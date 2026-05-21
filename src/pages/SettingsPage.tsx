@@ -8,6 +8,11 @@ import {
   settingGet,
   settingSet,
 } from "../services/bridge";
+import {
+  checkAppUpdate,
+  type AppUpdateStatus,
+} from "../services/updateService";
+import { useUpdater } from "../components/UpdateProvider";
 import { Topbar } from "../ui/Topbar";
 import { Card } from "../ui/Card";
 import { Field, FieldTextarea } from "../ui/Field";
@@ -37,11 +42,22 @@ export function SettingsPage() {
   const [jvm, setJvm] = useState("");
   const [closeOnLaunch, setCloseOnLaunch] = useState(false);
   const [verboseGameLogs, setVerboseGameLogs] = useState(true);
+  const [autoCheckUpdates, setAutoCheckUpdates] = useState(true);
+  const [autoInstallUpdates, setAutoInstallUpdates] = useState(true);
   const [msClientId, setMsClientId] = useState("");
   const [detected, setDetected] = useState<
     Array<{ path: string; version: string | null }>
   >([]);
   const [saved, setSaved] = useState<null | "ok" | "err">(null);
+  const [updateStatus, setUpdateStatus] = useState<AppUpdateStatus | null>(
+    null,
+  );
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
+  const [pendingUpdate, setPendingUpdate] = useState<
+    AppUpdateStatus["native"]
+  >(null);
+  const { installNow, phase: updatePhase, progress: updateProgress } =
+    useUpdater();
 
   useEffect(() => {
     void (async () => {
@@ -57,6 +73,10 @@ export function SettingsPage() {
       setVerboseGameLogs(
         (await settingGet("verboseGameLogs")) !== "false",
       );
+      setAutoCheckUpdates((await settingGet("autoCheckUpdates")) !== "false");
+      setAutoInstallUpdates(
+        (await settingGet("autoInstallUpdates")) !== "false",
+      );
       setMsClientId((await settingGet("microsoftClientId")) || "");
     })();
   }, []);
@@ -68,6 +88,8 @@ export function SettingsPage() {
       await settingSet("globalJvmArgs", jvm);
       await settingSet("closeOnLaunch", String(closeOnLaunch));
       await settingSet("verboseGameLogs", String(verboseGameLogs));
+      await settingSet("autoCheckUpdates", String(autoCheckUpdates));
+      await settingSet("autoInstallUpdates", String(autoInstallUpdates));
       await settingSet("microsoftClientId", msClientId.trim());
       await logAppend("launcher", "info", "Ajustes guardados");
       setSaved("ok");
@@ -245,6 +267,20 @@ export function SettingsPage() {
               title="Registrar consola del juego"
               description="Captura stdout / stderr de Minecraft en la pestaña Registros."
             />
+            <div className="my-3 h-px w-full bg-line" />
+            <ToggleRow
+              checked={autoCheckUpdates}
+              onChange={setAutoCheckUpdates}
+              title="Buscar actualizaciones automáticamente"
+              description="Comprueba si hay builds nuevos al abrir Metta y periódicamente en segundo plano."
+            />
+            <div className="my-3 h-px w-full bg-line" />
+            <ToggleRow
+              checked={autoInstallUpdates}
+              onChange={setAutoInstallUpdates}
+              title="Instalar actualizaciones automáticamente"
+              description="Si hay versión nueva, Metta la descarga e instala encima de la actual y se reinicia solo. Sin desinstalar ni descargar instaladores."
+            />
           </Card>
 
           <Card
@@ -262,10 +298,97 @@ export function SettingsPage() {
           </Card>
 
           <Card eyebrow="Acerca de" title="Metta Launcher">
-            <div className="grid grid-cols-2 gap-3">
+            <p className="text-[12px] leading-relaxed text-ink-muted">
+              Las builds oficiales se actualizan solas, como Discord o Spotify:
+              descarga el parche, lo aplica sobre la instalación existente y
+              reinicia. Tus instancias, mods y ajustes se conservan.
+            </p>
+            <div className="mt-4 grid grid-cols-2 gap-3">
               <Info label="Versión" value={version} />
               <Info label="Plataforma" value={platformLabel()} />
             </div>
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                className="btn text-[12px]"
+                disabled={checkingUpdate || updatePhase === "downloading"}
+                onClick={() =>
+                  tap("Comprobar actualizaciones", async () => {
+                    setCheckingUpdate(true);
+                    try {
+                      const status = await checkAppUpdate();
+                      setUpdateStatus(status);
+                      setPendingUpdate(status.native);
+                    } finally {
+                      setCheckingUpdate(false);
+                    }
+                  })
+                }
+              >
+                {checkingUpdate ? "Comprobando…" : "Comprobar ahora"}
+              </button>
+              {updateStatus?.updateAvailable && pendingUpdate && (
+                <button
+                  type="button"
+                  className="btn-gold text-[12px]"
+                  disabled={updatePhase === "downloading"}
+                  onClick={() =>
+                    tap("Actualizar ahora", async () => {
+                      await installNow(pendingUpdate);
+                    })
+                  }
+                >
+                  Actualizar a v{updateStatus.latestVersion}
+                </button>
+              )}
+            </div>
+            {(updatePhase === "downloading" || updatePhase === "restarting") && (
+              <div className="mt-3">
+                <div className="mb-1 flex justify-between text-[10.5px] text-ink-faint">
+                  <span>
+                    {updatePhase === "restarting"
+                      ? "Reiniciando…"
+                      : "Instalando actualización…"}
+                  </span>
+                  <span>{updateProgress}%</span>
+                </div>
+                <div className="h-1.5 overflow-hidden rounded-full bg-canvas-deep">
+                  <div
+                    className="h-full rounded-full bg-gold-gradient transition-all duration-300"
+                    style={{ width: `${updateProgress}%` }}
+                  />
+                </div>
+              </div>
+            )}
+            {updateStatus && (
+              <div className="mt-3 rounded-xl border border-line bg-canvas-deep/40 p-3 text-[11.5px] text-ink-soft">
+                {updateStatus.updateAvailable ? (
+                  <p>
+                    Hay una versión nueva:{" "}
+                    <span className="text-gold-200">
+                      v{updateStatus.latestVersion}
+                    </span>{" "}
+                    (tienes v{updateStatus.currentVersion}).
+                    {pendingUpdate
+                      ? autoInstallUpdates
+                        ? " Se instalará automáticamente en segundo plano."
+                        : " Pulsa «Actualizar» para instalarla sin desinstalar."
+                      : " Solo disponible en builds oficiales instaladas (no en modo desarrollo)."}
+                  </p>
+                ) : (
+                  <p>
+                    Estás en la última versión publicada (v
+                    {updateStatus.currentVersion}).
+                  </p>
+                )}
+                {updateStatus.notes && (
+                  <p className="mt-2 line-clamp-4 whitespace-pre-wrap text-ink-muted">
+                    {updateStatus.notes.slice(0, 400)}
+                    {updateStatus.notes.length > 400 ? "…" : ""}
+                  </p>
+                )}
+              </div>
+            )}
             <div className="mt-3 space-y-1.5 rounded-xl border border-line bg-canvas-deep/40 p-3 text-[11px]">
               <Row label="Datos" value={root} />
               <Row label="Base SQLite" value={dbPath} />

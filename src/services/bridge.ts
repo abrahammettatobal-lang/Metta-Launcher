@@ -135,6 +135,7 @@ export async function getLaunchSession(accountId: string): Promise<{
   uuid: string;
   username: string;
   userType: string;
+  xuid: string;
 }> {
   return invoke("get_launch_session", { accountId });
 }
@@ -228,6 +229,7 @@ export async function spawnJavaGame(payload: {
   cwd: string;
   args: string[];
   env: [string, string][];
+  instanceId?: string;
 }): Promise<void> {
   await invoke("spawn_java_game", { req: payload });
 }
@@ -269,4 +271,146 @@ export async function resolveMinecraftSkin(
   username: string,
 ): Promise<ResolvedSkin> {
   return invoke("resolve_minecraft_skin", { username });
+}
+
+export async function accountLogout(accountId: string): Promise<void> {
+  await invoke("account_logout", { accountId });
+}
+
+export async function instanceTouchLastPlayed(id: string): Promise<void> {
+  await invoke("instance_touch_last_played", { id });
+}
+
+export interface LaunchHistoryRow {
+  id: number;
+  instanceId: string;
+  instanceName: string | null;
+  startedAt: string;
+  finishedAt: string | null;
+  exitCode: number | null;
+  success: boolean;
+}
+
+export async function launchHistoryList(limit = 20): Promise<LaunchHistoryRow[]> {
+  return invoke("launch_history_list", { limit });
+}
+
+export interface SystemDiagnostic {
+  os: string;
+  arch: string;
+  javaCandidates: JavaCandidate[];
+  launcherRoot: string;
+  appDataDir: string;
+  tauriVersion: string;
+  launcherVersion: string;
+}
+
+export async function systemDiagnose(): Promise<SystemDiagnostic> {
+  return invoke("system_diagnose");
+}
+
+export interface NetworkEndpoint {
+  name: string;
+  url: string;
+  ok: boolean;
+  latencyMs: number | null;
+  error: string | null;
+}
+
+export async function networkCheck(): Promise<NetworkEndpoint[]> {
+  return invoke("network_check");
+}
+
+export interface CacheClearResult {
+  removedFiles: number;
+  freedBytes: number;
+  paths: string[];
+}
+
+export async function cacheClear(includeOldLogs: boolean): Promise<CacheClearResult> {
+  return invoke("cache_clear", { includeOldLogs });
+}
+
+export interface RepairCheck {
+  name: string;
+  ok: boolean;
+  detail: string;
+}
+
+export interface RepairReport {
+  checks: RepairCheck[];
+  fixed: number;
+  errors: string[];
+}
+
+export async function instanceRepair(
+  instancePath: string,
+  minecraftVersion: string,
+): Promise<RepairReport> {
+  return invoke("instance_repair", { instancePath, minecraftVersion });
+}
+
+export interface BackupInfo {
+  path: string;
+  sizeBytes: number;
+  createdAt: string;
+}
+
+export async function instanceBackup(
+  instancePath: string,
+  name: string,
+): Promise<BackupInfo> {
+  return invoke("instance_backup", { instancePath, name });
+}
+
+export interface LauncherUpdateInfo {
+  currentVersion: string;
+  latestVersion: string | null;
+  releaseUrl: string | null;
+  changelog: string | null;
+  updateAvailable: boolean;
+}
+
+export async function launcherCheckUpdate(): Promise<LauncherUpdateInfo> {
+  return invoke("launcher_check_update");
+}
+
+export async function recommendedJava(minecraftVersion: string): Promise<number> {
+  return invoke("recommended_java", { minecraftVersion });
+}
+
+export interface ModMetadata {
+  modId: string | null;
+  name: string | null;
+  version: string | null;
+  loader: string | null;
+}
+
+export async function modParseMetadata(jarPath: string): Promise<ModMetadata> {
+  return invoke("mod_parse_metadata", { jarPath });
+}
+
+export interface BackupListItem {
+  path: string;
+  name: string;
+  sizeBytes: number;
+  modifiedAt: string;
+}
+
+export async function backupsList(): Promise<BackupListItem[]> {
+  return invoke("backups_list");
+}
+
+export async function instanceRestoreBackup(
+  zipPath: string,
+  instancePath: string,
+): Promise<void> {
+  await invoke("instance_restore_backup", { zipPath, instancePath });
+}
+
+export async function instanceImportZip(
+  zipPath: string,
+  folderName: string,
+): Promise<string> {
+  return invoke("instance_import_zip", { zipPath, folderName });
 }

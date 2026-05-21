@@ -58,6 +58,15 @@ export function ModsPage() {
   }, [mods, query]);
 
   const enabledCount = mods.filter((m) => m.enabled).length;
+  const duplicateCount = mods.filter((m) => m.duplicateOf).length;
+  const detectedLoader = useMemo(() => {
+    const loaders = new Set(
+      mods.map((m) => m.metadata?.loader).filter(Boolean) as string[],
+    );
+    if (loaders.size === 1) return [...loaders][0];
+    if (loaders.size > 1) return "mixto";
+    return cur?.loaderType ?? "—";
+  }, [mods, cur]);
 
   return (
     <div className="space-y-6">
@@ -122,6 +131,10 @@ export function ModsPage() {
           </div>
           <div className="flex gap-2">
             <Stat label="Activos" value={String(enabledCount)} />
+            <Stat label="Loader" value={detectedLoader} />
+            {duplicateCount > 0 && (
+              <Stat label="Duplicados" value={String(duplicateCount)} warn />
+            )}
             <Stat label="Tamaño" value={formatBytes(sz)} />
           </div>
         </div>
@@ -142,7 +155,8 @@ export function ModsPage() {
           <table className="t">
             <thead>
               <tr>
-                <th>Archivo</th>
+                <th>Mod</th>
+                <th>Loader / versión</th>
                 <th className="!text-right">Tamaño</th>
                 <th className="w-[120px]">Activo</th>
                 <th className="w-[110px]" />
@@ -163,13 +177,23 @@ export function ModsPage() {
                       </span>
                       <div className="min-w-0">
                         <div className="truncate text-[13px] font-medium text-ink">
-                          {m.fileName.replace(/\.jar$/i, "")}
+                          {m.metadata?.name ??
+                            m.fileName.replace(/\.jar$/i, "")}
                         </div>
                         <div className="truncate font-mono text-[10.5px] text-ink-faint">
                           {m.fileName}
+                          {m.duplicateOf && (
+                            <span className="ml-2 text-amber-300">
+                              duplicado de {m.duplicateOf.replace(/\.jar$/i, "")}
+                            </span>
+                          )}
                         </div>
                       </div>
                     </div>
+                  </td>
+                  <td className="text-[11.5px] text-ink-soft">
+                    {m.metadata?.loader ?? "—"}
+                    {m.metadata?.version ? ` · ${m.metadata.version}` : ""}
                   </td>
                   <td className="!text-right text-[12px] text-ink-soft">
                     {formatBytes(m.size)}
@@ -214,9 +238,23 @@ export function ModsPage() {
   );
 }
 
-function Stat({ label, value }: { label: string; value: string }) {
+function Stat({
+  label,
+  value,
+  warn,
+}: {
+  label: string;
+  value: string;
+  warn?: boolean;
+}) {
   return (
-    <div className="rounded-xl border border-line bg-canvas-deep/40 px-3 py-2">
+    <div
+      className={`rounded-xl border px-3 py-2 ${
+        warn
+          ? "border-amber-500/30 bg-amber-500/10"
+          : "border-line bg-canvas-deep/40"
+      }`}
+    >
       <div className="text-[9.5px] font-semibold uppercase tracking-[0.18em] text-ink-faint">
         {label}
       </div>

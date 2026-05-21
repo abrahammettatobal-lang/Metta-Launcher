@@ -162,6 +162,22 @@ export function IconRefresh(p: Props) {
   );
 }
 
+export function IconLoader(p: Props) {
+  return (
+    <svg {...base} {...p}>
+      <path d="M12 3a9 9 0 1 0 9 9" />
+    </svg>
+  );
+}
+
+export function IconActivity(p: Props) {
+  return (
+    <svg {...base} {...p}>
+      <path d="M4 14h4l2-8 4 16 2-6h4" />
+    </svg>
+  );
+}
+
 export function IconDownload(p: Props) {
   return (
     <svg {...base} {...p}>

@@ -5,8 +5,20 @@ Minecraft launcher for Windows, Linux and macOS (Tauri + React + TypeScript + Ta
 ## Requirements
 
 - [Node.js](https://nodejs.org/) 20+
-- [Rust](https://www.rust-lang.org/tools/install) stable (for `cargo` and `tauri`)
+- [Rust](https://rustup.rs/) **stable** via **rustup** (1.78+; el proyecto incluye `rust-toolchain.toml`)
+- Linux: dependencias de compilación Tauri/GTK (ver abajo)
 - WebView2 on Windows (usually preinstalled)
+
+### Linux — dependencias de sistema
+
+```bash
+sudo apt update
+sudo apt install -y libwebkit2gtk-4.1-dev build-essential curl wget file libssl-dev libayatana-appindicator3-dev librsvg2-dev
+```
+
+Tras instalar rustup, asegúrate de que `~/.cargo/bin` esté en tu PATH (reabre la terminal o ejecuta `source "$HOME/.cargo/env"`).
+
+Si ves `lock file version 4 requires ...`, estás usando el `cargo` del sistema (1.75). Usa el de rustup.
 
 ## Install
 

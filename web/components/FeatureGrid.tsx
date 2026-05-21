@@ -32,9 +32,29 @@ const features: Feature[] = [
     glyph: <GlyphInstances />,
   },
   {
-    title: "Mods por instancia",
+    title: "Diagnóstico y mantenimiento",
     description:
-      "Activa, desactiva o elimina mods individualmente. Sin colisiones entre packs, sin tener que duplicar carpetas a mano.",
+      "Comprueba conectividad con Mojang, Fabric y GitHub. Limpia caché, repara carpetas de instancia y crea backups ZIP restaurables.",
+    badge: "v0.4",
+    glyph: <GlyphShield />,
+  },
+  {
+    title: "Historial de sesiones",
+    description:
+      "Cada vez que juegas, Metta registra inicio, fin, duración y código de salida. Revisa tu actividad reciente sin salir del launcher.",
+    badge: "Nuevo",
+    glyph: <GlyphHistory />,
+  },
+  {
+    title: "Importar y restaurar",
+    description:
+      "Importa packs de mods desde ZIP o restaura un backup anterior sobre una instancia existente. Ideal para migrar mundos o recuperar configuraciones.",
+    glyph: <GlyphImport />,
+  },
+  {
+    title: "Mods con metadata",
+    description:
+      "Lee fabric.mod.json y mods.toml dentro de cada .jar. Detecta duplicados por mod ID y muestra loader, nombre y versión del mod.",
     glyph: <GlyphMods />,
   },
   {
@@ -42,6 +62,13 @@ const features: Feature[] = [
     description:
       "Diseño premium negro/dorado pensado para que el launcher se sienta como un producto, no como una herramienta. Atajos, animaciones suaves y modo cinematográfico.",
     glyph: <GlyphInterface />,
+  },
+  {
+    title: "Actualizaciones automáticas",
+    description:
+      "Metta se actualiza sola: descarga el parche, lo aplica sobre tu instalación actual y reinicia. Sin desinstalar, sin volver a descargar el instalador.",
+    badge: "In-app",
+    glyph: <GlyphPerformance />,
   },
   {
     title: "Rendimiento optimizado",
@@ -189,6 +216,23 @@ function GlyphJava() {
       <path d="M13 3c-1 2 1.5 3 1.5 4.5S13 9.5 13 11" />
       <path d="M5 14h14a4 4 0 01-4 4H9a4 4 0 01-4-4z" />
       <path d="M7 21h10" />
+    </svg>
+  );
+}
+function GlyphHistory() {
+  return (
+    <svg {...G}>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 7v5l3 2" />
+    </svg>
+  );
+}
+function GlyphImport() {
+  return (
+    <svg {...G}>
+      <path d="M12 3v12" />
+      <path d="M8 11l4 4 4-4" />
+      <path d="M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" />
     </svg>
   );
 }

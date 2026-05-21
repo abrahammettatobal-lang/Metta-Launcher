@@ -52,16 +52,59 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          # __VERSION__ is replaced by tauri-action with the version read from
-          # `src-tauri/tauri.conf.json`, so bumping versions there is enough.
           tagName: v__VERSION__
           releaseName: 'Metta Launcher v__VERSION__'
           releaseBody: |
             Release de **Metta Launcher v__VERSION__**.
 
             Descarga el instalador para tu sistema operativo en los assets de abajo.
-            Consulta el CHANGELOG / commits para los cambios incluidos.
+            La app instalada puede actualizarse sola (in-app): descarga el parche firmado, lo aplica sobre la versión actual y reinicia. No hace falta desinstalar.
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
+
+  merge-updater-manifest:
+    needs: publish-tauri
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read version
+        id: version
+        run: |
+          VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Download release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p release-assets
+          gh release download "v${{ steps.version.outputs.version }}" \
+            --repo "${{ github.repository }}" \
+            --dir release-assets \
+            --pattern "*.sig" \
+            --pattern "*.AppImage" \
+            --pattern "*setup.exe" \
+            --pattern "*.app.tar.gz" \
+            --pattern "*.msi" \
+            || true
+          ls -la release-assets || true
+
+      - name: Build latest.json
+        run: |
+          node scripts/build-latest-json.mjs release-assets "${{ steps.version.outputs.version }}"
+
+      - name: Upload latest.json to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "v${{ steps.version.outputs.version }}" \
+            release-assets/latest.json \
+            --repo "${{ github.repository }}" \
+            --clobber

@@ -1,10 +1,13 @@
 import { openPath } from "@tauri-apps/plugin-opener";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
+import { Link, useNavigate } from "react-router-dom";
 import {
   accountsList,
   instancesList,
+  launchHistoryList,
   logsQuery,
+  settingGet,
 } from "../services/bridge";
 import type { AccountRow, InstanceRow } from "../services/bridge";
 import {
@@ -27,6 +30,7 @@ import { loaderLabel, relativeTime } from "../utils/format";
 import { Hero } from "../ui/Hero";
 import { StatTile } from "../ui/StatTile";
 import { Card } from "../ui/Card";
+import { Topbar } from "../ui/Topbar";
 import { Avatar } from "../ui/Avatar";
 import { Empty } from "../ui/Empty";
 import {
@@ -44,6 +48,7 @@ import {
 } from "../ui/icons";
 
 export function Dashboard() {
+  const nav = useNavigate();
   const [instances, setInstances] = useState<InstanceRow[]>([]);
   const [sel, setSel] = useState<string>("");
   const [accounts, setAccounts] = useState<AccountRow[]>([]);
@@ -55,15 +60,30 @@ export function Dashboard() {
   const [progress, setProgress] = useState<LaunchProgress | null>(null);
   const [modCounts, setModCounts] = useState<Record<string, number>>({});
   const [news, setNews] = useState<MojangNewsEntry[]>([]);
+  const [history, setHistory] = useState<
+    Array<{
+      instanceName: string | null;
+      startedAt: string;
+      success: boolean;
+    }>
+  >([]);
 
   const load = useCallback(async () => {
-    const [i, a, logs] = await Promise.all([
+    const [i, a, logs, hist] = await Promise.all([
       instancesList(),
       accountsList(),
       logsQuery(8, undefined, "launcher"),
+      launchHistoryList(6),
     ]);
     setInstances(i);
     setAccounts(a);
+    setHistory(
+      hist.map((h) => ({
+        instanceName: h.instanceName,
+        startedAt: h.startedAt,
+        success: h.success,
+      })),
+    );
     if (!sel && i[0]) setSel(i[0].id);
     setLogTail(logs);
   }, [sel]);
@@ -108,11 +128,14 @@ export function Dashboard() {
   useEffect(() => {
     let a: (() => void) | undefined;
     let b: (() => void) | undefined;
-    void subscribeGameLog((l) => {
-      void logAppend("game", "info", `[${l.stream}] ${l.line}`, sel || undefined);
-    }).then((x) => {
-      a = x;
-    });
+    void (async () => {
+      const verbose = (await settingGet("verboseGameLogs")) === "true";
+      if (!verbose) return;
+      const unsub = await subscribeGameLog((l) => {
+        void logAppend("game", "info", `[${l.stream}] ${l.line}`, sel || undefined);
+      });
+      a = unsub;
+    })();
     void subscribeGameExit((e) => {
       void logAppend(
         "launcher",
@@ -121,6 +144,7 @@ export function Dashboard() {
         sel || undefined,
       );
       setBusy(false);
+      void load();
     }).then((y) => {
       b = y;
     });
@@ -128,7 +152,7 @@ export function Dashboard() {
       a?.();
       b?.();
     };
-  }, [sel]);
+  }, [sel, load]);
 
   useEffect(() => {
     let cancelled = false;
@@ -168,7 +192,8 @@ export function Dashboard() {
     setBusy(true);
     try {
       await launchInstance(cur.id);
-    } finally {
+      setBusy(true);
+    } catch {
       setBusy(false);
     }
   }
@@ -182,38 +207,33 @@ export function Dashboard() {
     progress.phase !== "error";
 
   return (
-    <div className="space-y-7">
-      {/* Top heading */}
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.28em] text-gold-300/90">
-            Inicio
-          </div>
-          <h1 className="page-title">Bienvenido de vuelta</h1>
-          <p className="page-subtitle">
-            Lanza, gestiona y personaliza tus mundos de Minecraft.
-          </p>
-        </div>
-        <InstanceSwitcher
-          instances={instances}
-          selected={sel}
-          onChange={setSel}
-        />
-      </div>
+    <div className="space-y-6">
+      <Topbar
+        eyebrow="Inicio"
+        title="Panel de control"
+        subtitle="Selecciona una instancia, revisa el estado y lanza el juego."
+        actions={
+          <InstanceSwitcher
+            instances={instances}
+            selected={sel}
+            onChange={setSel}
+          />
+        }
+      />
 
-      {/* Hero */}
       {cur ? (
         <Hero
           title={cur.name}
           subtitle={
             activeAcc
-              ? `Jugando como ${activeAcc.username} · ${activeAcc.kind === "microsoft" ? "Microsoft" : "Local"}`
-              : "Añade una cuenta para poder jugar."
+              ? `Sesión: ${activeAcc.username} · ${activeAcc.kind === "microsoft" ? "Microsoft" : "Local"}`
+              : "Configura una cuenta en Perfiles para jugar en servidores Premium."
           }
           loaderLabel={loaderLabel(cur.loaderType, cur.loaderVersion)}
           versionLabel={cur.minecraftVersion}
           imageUrl={heroImage}
           onPlay={() => void tap("Jugar", async () => handlePlay())}
+          onConfig={() => nav(`/instances/${cur.id}/edit`)}
           disabled={busy || !activeAcc}
           playing={progress?.phase === "running"}
           progress={
@@ -253,12 +273,9 @@ export function Dashboard() {
           title="No tienes instancias todavía"
           description="Crea tu primera instancia para empezar a jugar."
           action={
-            <a
-              href="/create"
-              className="btn-gold"
-            >
+            <Link to="/create" className="btn-gold">
               Crear instancia
-            </a>
+            </Link>
           }
         />
       )}
@@ -300,7 +317,8 @@ export function Dashboard() {
       <div className="grid gap-4 lg:grid-cols-[1.4fr_1fr]">
         <Card
           eyebrow="Noticias"
-          title="Lo último de Minecraft"
+          title="Minecraft"
+          interactive
           action={
             <span className="pill">
               <IconSparkle width={11} height={11} /> Mojang News
@@ -322,24 +340,42 @@ export function Dashboard() {
         </Card>
 
         <Card
-          eyebrow="Actividad reciente"
-          title="Tus instancias"
+          eyebrow="Actividad"
+          title="Recientes"
+          interactive
           action={
-            <a
-              href="/instances"
+            <Link
+              to="/instances"
               className="btn-ghost text-[11.5px] !text-ink-muted hover:!text-ink"
             >
               Ver todas
-            </a>
+            </Link>
           }
         >
-          {lastPlayedInstances.length === 0 ? (
+          {lastPlayedInstances.length === 0 && history.length === 0 ? (
             <Empty
               title="Sin actividad"
               description="Cuando lances una instancia aparecerá aquí."
             />
           ) : (
             <ul className="space-y-2">
+              {history.slice(0, 4).map((h, idx) => (
+                <li
+                  key={`${h.startedAt}-${idx}`}
+                  className="flex items-center justify-between rounded-xl border border-line/60 bg-canvas-deep/30 px-3 py-2 text-[12px]"
+                >
+                  <span className="truncate text-ink-soft">
+                    {h.instanceName ?? "Instancia"}
+                  </span>
+                  <span
+                    className={
+                      h.success ? "text-emerald-300" : "text-red-300"
+                    }
+                  >
+                    {relativeTime(h.startedAt)}
+                  </span>
+                </li>
+              ))}
               {lastPlayedInstances.map((i) => (
                 <li key={i.id}>
                   <button
@@ -504,15 +540,15 @@ function InstanceSwitcher({
 }) {
   if (!instances.length) return null;
   return (
-    <div className="flex items-center gap-2 rounded-xl border border-line bg-canvas-card/65 p-1 backdrop-blur-md shadow-innerline">
-      <span className="px-2 text-[10.5px] font-semibold uppercase tracking-[0.2em] text-ink-faint">
+    <div className="glass-soft flex items-center gap-2.5 rounded-xl p-1.5 shadow-innerline">
+      <span className="hidden px-2 text-[10px] font-medium uppercase tracking-[0.18em] text-ink-faint sm:inline">
         Instancia
       </span>
-      <div className="relative">
+      <div className="relative min-w-[160px]">
         <select
           value={selected}
           onChange={(e) => onChange(e.target.value)}
-          className="appearance-none rounded-lg border border-transparent bg-canvas-deep/80 px-3 py-1.5 pr-8 text-[12.5px] font-medium text-ink outline-none transition focus:border-gold-500/40"
+          className="field !border-transparent !bg-canvas-deep/70 !py-2 !pr-9 !text-[12.5px] !font-medium"
         >
           {instances.map((i) => (
             <option key={i.id} value={i.id} className="bg-canvas-deep">
@@ -555,7 +591,7 @@ function QuickAction({
     <button
       type="button"
       onClick={onClick}
-      className="group flex flex-col items-center justify-center gap-2 rounded-xl border border-line bg-canvas-raised/55 px-3 py-4 text-[11.5px] font-medium text-ink-soft transition-all duration-200 ease-soft hover:-translate-y-0.5 hover:border-gold-500/30 hover:bg-canvas-card/85 hover:text-ink"
+      className="surface-interactive group flex flex-col items-center justify-center gap-2.5 rounded-xl border border-line bg-canvas-raised/45 px-3 py-4 text-[11px] font-medium text-ink-soft"
     >
       <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-line bg-canvas-deep/70 text-gold-300 transition-colors duration-200 group-hover:text-gold-200">
         {icon}

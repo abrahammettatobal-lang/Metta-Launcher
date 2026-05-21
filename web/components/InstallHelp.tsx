@@ -179,17 +179,17 @@ function LinuxHelp() {
         <CommandBlock
           title="Debian / Ubuntu / Pop!_OS / Mint"
           format="DEB"
-          command="sudo apt install ./Metta.Launcher_0.3.1_amd64.deb"
+          command="sudo apt install ./Metta.Launcher_0.4.0_amd64.deb"
         />
         <CommandBlock
           title="Fedora / RHEL / openSUSE"
           format="RPM"
-          command="sudo rpm -i ./Metta.Launcher-0.3.1-1.x86_64.rpm"
+          command="sudo rpm -i ./Metta.Launcher-0.4.0-1.x86_64.rpm"
         />
         <CommandBlock
           title="Universal (cualquier distro)"
           format="AppImage"
-          command={`chmod +x Metta.Launcher_0.3.1_amd64.AppImage\n./Metta.Launcher_0.3.1_amd64.AppImage`}
+          command={`chmod +x Metta.Launcher_0.4.0_amd64.AppImage\n./Metta.Launcher_0.4.0_amd64.AppImage`}
         />
       </div>
 

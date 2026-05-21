@@ -1,11 +1,21 @@
-import { dirDiskUsage, listDirCmd, pathExists, removeFileCmd } from "./bridge";
+import {
+  dirDiskUsage,
+  listDirCmd,
+  modParseMetadata,
+  pathExists,
+  removeFileCmd,
+  type ModMetadata,
+} from "./bridge";
 import { invoke } from "@tauri-apps/api/core";
+import { fullPath } from "../utils/full-path";
 
 export interface ModEntry {
   fileName: string;
   relPath: string;
   size: number;
   enabled: boolean;
+  metadata?: ModMetadata;
+  duplicateOf?: string;
 }
 
 export async function listMods(instancePath: string): Promise<ModEntry[]> {
@@ -26,7 +36,45 @@ export async function listMods(instancePath: string): Promise<ModEntry[]> {
     });
   }
   out.sort((a, b) => a.fileName.localeCompare(b.fileName));
+  await enrichModMetadata(out, instancePath);
+  markDuplicates(out);
   return out;
+}
+
+async function enrichModMetadata(
+  mods: ModEntry[],
+  instancePath: string,
+): Promise<void> {
+  await Promise.all(
+    mods.map(async (m) => {
+      if (!m.enabled && !m.fileName.endsWith(".jar")) return;
+      try {
+        const abs = await fullPath(`${instancePath}/mods/${m.fileName}`);
+        m.metadata = await modParseMetadata(abs);
+      } catch {
+        /* sin metadata */
+      }
+    }),
+  );
+}
+
+function markDuplicates(mods: ModEntry[]): void {
+  const byKey = new Map<string, ModEntry[]>();
+  for (const m of mods) {
+    const key =
+      m.metadata?.modId?.toLowerCase() ??
+      m.fileName.replace(/\.jar$/i, "").toLowerCase();
+    const list = byKey.get(key) ?? [];
+    list.push(m);
+    byKey.set(key, list);
+  }
+  for (const group of byKey.values()) {
+    if (group.length < 2) continue;
+    const primary = group[0]!.fileName;
+    for (let i = 1; i < group.length; i++) {
+      group[i]!.duplicateOf = primary;
+    }
+  }
 }
 
 export async function movePath(from: string, to: string): Promise<void> {

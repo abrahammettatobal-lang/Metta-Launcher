@@ -1,6 +1,6 @@
 [package]
 name = "metta-launcher"
-version = "0.3.1"
+version = "0.4.0"
 description = "Metta Minecraft Launcher"
 authors = ["Metta"]
 edition = "2021"
@@ -15,10 +15,13 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = ["tray-icon", "devtools"] }
 tauri-plugin-opener = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rusqlite = { version = "0.32", features = ["bundled"] }
-reqwest = { version = "0.12", features = ["json", "stream", "multipart", "native-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "multipart", "rustls-tls"] }
 tokio = { version = "1", features = ["full"] }
 futures-util = "0.3"
 sha1 = "0.10"
