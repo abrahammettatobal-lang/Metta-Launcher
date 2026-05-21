@@ -4,11 +4,9 @@ const repo = "Metta-Launcher";
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // Railway / producción: servidor Node con API routes.
+  // Vercel: build estándar de Next.js (SSR + API routes serverless).
   // GitHub Pages: export estático con basePath del repo.
-  ...(isGhPages
-    ? { output: "export", images: { unoptimized: true } }
-    : { output: "standalone" }),
+  ...(isGhPages ? { output: "export", images: { unoptimized: true } } : {}),
   trailingSlash: true,
   basePath: isGhPages ? `/${repo}` : "",
   assetPrefix: isGhPages ? `/${repo}/` : "",

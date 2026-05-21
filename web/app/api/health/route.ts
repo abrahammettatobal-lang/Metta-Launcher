@@ -1,7 +1,7 @@
 import { RELEASE_VERSION } from "@/data/downloads";
 
 /**
- * Health check para Railway y monitoreo.
+ * Health check para Vercel y monitoreo.
  * GET /api/health
  */
 export async function GET() {
