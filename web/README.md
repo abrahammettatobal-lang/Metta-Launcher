@@ -1,48 +1,83 @@
 # Metta Launcher — Sitio web oficial
 
-Landing page de producción para Metta Launcher. Construida con **Next.js 14**
-(App Router), **TypeScript**, **Tailwind CSS** y **Framer Motion**.
+Landing page de producción para Metta Launcher. **Next.js 14** (App Router),
+TypeScript, Tailwind CSS y Framer Motion.
 
-## Desarrollo
+## Desarrollo local
 
 ```bash
 cd web
 npm install
+cp .env.example .env.local   # opcional: NEXT_PUBLIC_SITE_URL
 npm run dev
 # http://localhost:3030
 ```
 
-## Build estático
+## Despliegue en Railway (recomendado)
 
-```bash
-npm run build
-# Output en ./out
+Railway ejecuta Next.js como **servidor Node** (`output: "standalone"`), no
+como sitio estático. Eso permite:
+
+- Uptime estable frente a CDNs gratuitos inestables
+- **API routes** bajo `app/api/` (ya incluye `/api/health` y `/api/v1`)
+- Variables de entorno y dominio propio
+- Escalar o añadir servicios (DB, Redis) en el mismo proyecto
+
+### Pasos
+
+1. Crea un proyecto en [Railway](https://railway.com) → **Deploy from GitHub**.
+2. Selecciona este repositorio.
+3. En **Settings → Root Directory** pon: `web`
+4. Variables (Settings → Variables):
+   - `NEXT_PUBLIC_SITE_URL` = tu URL pública (ej. `https://metta-launcher.up.railway.app` o dominio custom)
+   - `PORT` lo asigna Railway automáticamente; no hace falta definirlo.
+5. Deploy. Railway usa `railway.json` + `nixpacks.toml` en `web/`.
+6. Health check: `GET /api/health/` debe responder `{ "ok": true }`.
+
+### Dominio custom
+
+Settings → Networking → **Custom Domain** → apunta CNAME a Railway y actualiza
+`NEXT_PUBLIC_SITE_URL` con la URL final.
+
+### Añadir APIs nuevas
+
+Crea rutas en `web/app/api/`, por ejemplo:
+
+```
+app/api/v1/news/route.ts
+app/api/v1/stats/route.ts
 ```
 
-El sitio se exporta como HTML estático (`output: "export"` en
-`next.config.mjs`), así que puede servirse desde cualquier CDN (Vercel,
-Netlify, GitHub Pages, Cloudflare Pages, S3…).
+Reinicia el servicio en Railway tras cada deploy (automático con push a `main`).
 
-## Despliegue a GitHub Pages
+## GitHub Pages (opcional / respaldo)
 
-Está automatizado: cada `push` a `main` que toque `web/**` dispara el workflow
-`.github/workflows/web-deploy.yml`, que construye con `DEPLOY_TARGET=gh-pages`
-(añade el `basePath` correcto) y publica `web/out/` en GitHub Pages.
+Solo export estático, **sin API routes**:
 
-Habilitar una vez en Settings → Pages → Source: **GitHub Actions**.
+```bash
+npm run build:static
+# genera ./out con basePath /Metta-Launcher
+```
+
+El workflow `.github/workflows/web-deploy.yml` publica en Pages cuando cambia
+`web/**`. Para producción principal usa Railway.
 
 ## Estructura
 
 ```
 web/
-  app/              # App Router (layout, page, globals)
-  components/       # UI components (Hero, FeatureGrid, …)
-  data/             # Catálogo de descargas
-  lib/              # Utilidades (detectPlatform)
-  public/           # Logo, favicon, OG image
+  app/
+    api/health/     # Health check (Railway)
+    api/v1/         # API v1 (extensible)
+    page.tsx        # Landing
+  components/
+  data/downloads.ts # Versión y URLs de release
+  lib/
+  railway.json
+  nixpacks.toml
 ```
 
-## Actualizar la versión publicada
+## Actualizar versión de descargas
 
 Editar `data/downloads.ts`:
 
@@ -50,5 +85,4 @@ Editar `data/downloads.ts`:
 export const RELEASE_VERSION = "0.3.1";
 ```
 
-Las URLs de los assets de cada plataforma se construyen automáticamente a
-partir de esa constante.
+Todas las URLs de assets se regeneran desde esa constante.

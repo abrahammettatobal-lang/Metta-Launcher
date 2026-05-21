@@ -37,10 +37,8 @@ jobs:
       - name: Install
         run: npm ci || npm install
 
-      - name: Build static site
-        run: npm run build
-        env:
-          DEPLOY_TARGET: gh-pages
+      - name: Build static site (GitHub Pages only)
+        run: npm run build:static
 
       - name: Add .nojekyll
         run: touch out/.nojekyll
