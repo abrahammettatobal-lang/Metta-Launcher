@@ -6,6 +6,7 @@ import { InstallHelp } from "@/components/InstallHelp";
 import { SecuritySection } from "@/components/SecuritySection";
 import { ChangelogSection } from "@/components/ChangelogSection";
 import { FAQ } from "@/components/FAQ";
+import { SponsorBadge } from "@/components/SponsorBadge";
 import { Footer } from "@/components/Footer";
 
 export default function Page() {
@@ -19,6 +20,7 @@ export default function Page() {
       <InstallHelp />
       <SecuritySection />
       <FAQ />
+      <SponsorBadge className="pt-4 pb-2" />
       <Footer />
     </main>
   );

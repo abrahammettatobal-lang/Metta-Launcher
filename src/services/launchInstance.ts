@@ -23,7 +23,9 @@ import { detectMcOs } from "./minecraft/os";
 import { installVanillaSide } from "./minecraft/vanillaInstaller";
 import { uuidWithHyphens } from "./minecraft/uuidFmt";
 import { ensureJava } from "./minecraft/javaManager";
+import { writeLaunchCache } from "./minecraft/launchCache";
 import {
+  profiler,
   progressPreparing,
   progressJava,
   progressLibraries,
@@ -119,6 +121,11 @@ export async function launchInstance(instanceId: string): Promise<void> {
   return task;
 }
 
+async function log(level: string, msg: string, instanceId: string) {
+  console.log(`[launch/${level}] ${msg}`);
+  await logAppend("launcher", level, msg, instanceId);
+}
+
 async function runLaunchPipeline(instanceId: string): Promise<void> {
   resetLaunchProgress();
   resetAbortFlag();
@@ -130,6 +137,8 @@ async function runLaunchPipeline(instanceId: string): Promise<void> {
     }
   };
 
+  // ─── Preparing ──────────────────────────────────────────────────────────────
+  profiler.start("Preparando");
   const paths = await appPaths();
   const root = paths.launcherRoot;
   const list = await instancesList();
@@ -149,68 +158,98 @@ async function runLaunchPipeline(instanceId: string): Promise<void> {
   await mkdirAllCmd(`${inst.instancePath}/saves`);
   await mkdirAllCmd(`${inst.instancePath}/resourcepacks`);
   await mkdirAllCmd(`${inst.instancePath}/shaderpacks`);
+  profiler.end("Preparando");
 
   // ─── Java ───────────────────────────────────────────────────────────────────
   checkAbort();
+  profiler.start("Java");
   progressJava("Buscando Java instalado…");
   const { javaPath } = await ensureJava(inst.javaPath, async (msg) => {
     progressJava(msg);
-    await logAppend("launcher", "info", msg, instanceId);
+    await log("info", msg, instanceId);
   });
-  await logAppend("launcher", "info", `[Java] Using: ${javaPath}`, instanceId);
+  await log("info", `[Java] Using: ${javaPath}`, instanceId);
+  profiler.end("Java");
 
   // ─── Installation ────────────────────────────────────────────────────────────
   checkAbort();
   let merged: McVersionJson;
 
   if (inst.loaderType === "vanilla") {
+    profiler.start("Librerías");
     progressLibraries("Vanilla: instalando librerías…");
     merged = await installVanillaSide(inst.minecraftVersion, os, nativesRel, async (m) => {
       if (m.startsWith("assets ")) {
         const [, rest] = m.split(" ");
         const [d, t] = rest.split("/");
-        progressAssets(Number(d), Number(t));
+        if (t && d) {
+          profiler.end("Librerías");
+          profiler.start("Assets");
+          progressAssets(Number(d), Number(t));
+        }
       } else if (m.includes("native")) {
+        profiler.end("Assets");
+        profiler.start("Natives");
         progressNatives(m);
       } else if (m.includes("librar")) {
         progressLibraries(m);
       }
-      await logAppend("launcher", "info", m, instanceId);
+      await log("info", m, instanceId);
     });
+    profiler.end("Natives");
   } else if (inst.loaderType === "fabric") {
+    profiler.start("Librerías");
     progressLibraries("Vanilla: instalando librerías base…");
     await installVanillaSide(inst.minecraftVersion, os, nativesRel, async (m) => {
       if (m.startsWith("assets ")) {
         const [, rest] = m.split(" ");
         const [d, t] = rest.split("/");
-        progressAssets(Number(d), Number(t));
+        if (t && d) {
+          profiler.end("Librerías");
+          profiler.start("Assets");
+          progressAssets(Number(d), Number(t));
+        }
       } else if (m.includes("native")) {
+        profiler.end("Assets");
+        profiler.start("Natives");
         progressNatives(m);
       } else if (m.includes("librar")) {
         progressLibraries(m);
       }
-      await logAppend("launcher", "info", m, instanceId);
+      await log("info", m, instanceId);
     });
+    profiler.end("Natives");
+    profiler.start("Loader");
     progressLoader(`Fabric: instalando loader ${inst.loaderVersion}…`);
     merged = await installFabricSide(inst.minecraftVersion, inst.loaderVersion);
+    profiler.end("Loader");
   } else if (inst.loaderType === "forge") {
+    profiler.start("Librerías");
     progressLibraries("Vanilla: instalando librerías base…");
     await installVanillaSide(inst.minecraftVersion, os, nativesRel, async () => undefined);
+    profiler.end("Librerías");
+    profiler.start("Loader");
     progressLoader(`Forge: instalando loader ${inst.loaderVersion}…`);
     merged = await installForgeSide(javaPath, root, inst.minecraftVersion, inst.loaderVersion);
     merged = await mergeInheritedVersionJson(merged);
+    profiler.end("Loader");
   } else if (inst.loaderType === "neoforge") {
+    profiler.start("Librerías");
     progressLibraries("Vanilla: instalando librerías base…");
     await installVanillaSide(inst.minecraftVersion, os, nativesRel, async () => undefined);
+    profiler.end("Librerías");
+    profiler.start("Loader");
     progressLoader(`NeoForge: instalando loader ${inst.loaderVersion}…`);
     merged = await installNeoForgeSide(javaPath, root, inst.loaderVersion);
     merged = await mergeInheritedVersionJson(merged);
+    profiler.end("Loader");
   } else {
     throw new Error("Unknown loader");
   }
 
   // ─── Classpath ───────────────────────────────────────────────────────────────
   checkAbort();
+  profiler.start("Classpath");
   const cpSep = os === "windows" ? ";" : ":";
   const seen = new Set<string>();
   const cpParts: string[] = [];
@@ -224,6 +263,7 @@ async function runLaunchPipeline(instanceId: string): Promise<void> {
   }
   cpParts.push(abs(root, `shared/versions/${inst.minecraftVersion}/${inst.minecraftVersion}.jar`));
   const classpath = cpParts.join(cpSep);
+  profiler.end("Classpath");
 
   const session = await getLaunchSession(active.id);
   const uuid = uuidWithHyphens(session.uuid);
@@ -268,17 +308,42 @@ async function runLaunchPipeline(instanceId: string): Promise<void> {
     Number(inst.maxRamMb),
   );
 
+  // ─── Log profiler timings ────────────────────────────────────────────────────
+  profiler.start("Proceso Java");
+  for (const line of profiler.summary()) {
+    await log("info", line, instanceId);
+  }
+
   checkAbort();
   progressStarting(`Iniciando Java en ${javaPath}…`);
-  await logAppend("launcher", "info", `Starting Java: ${javaPath}`, instanceId);
+  await log("info", `Starting Java: ${javaPath}`, instanceId);
   await spawnJavaGame({
     javaPath,
     cwd: rep.game_directory,
     args: argv,
     env: [["METTA_LAUNCHER", "1"]],
+<<<<<<< HEAD
     instanceId: inst.id,
+=======
+    instanceId,
+>>>>>>> ebd7683 (Add sponsor badge, live logs, launch optimizations, and web sponsor section)
   });
+  profiler.end("Proceso Java");
   progressRunning();
+
+  // Persist launch cache for future fast-path validation
+  try {
+    await writeLaunchCache(inst.instancePath, {
+      mcVersion: inst.minecraftVersion,
+      loaderType: inst.loaderType,
+      loaderVersion: inst.loaderVersion,
+      javaPath,
+      javaValidatedAt: new Date().toISOString(),
+      lastSuccessfulLaunch: new Date().toISOString(),
+    });
+  } catch {
+    // Cache write failure is non-critical
+  }
 
   // Honor user preference: minimize the launcher window while the game runs.
   const closeOnLaunch = (await settingGet("closeOnLaunch")) === "true";
@@ -287,12 +352,7 @@ async function runLaunchPipeline(instanceId: string): Promise<void> {
       const win = (await import("@tauri-apps/api/window")).getCurrentWindow();
       await win.minimize();
     } catch (e) {
-      await logAppend(
-        "launcher",
-        "warn",
-        `No se pudo minimizar la ventana: ${e}`,
-        instanceId,
-      );
+      await log("warn", `No se pudo minimizar la ventana: ${e}`, instanceId);
     }
   }
 }

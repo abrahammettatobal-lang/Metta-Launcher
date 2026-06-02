@@ -58,7 +58,13 @@ export async function installVanillaSide(
   onStep?.("Asset index…");
   const indexData = await ensureAssetIndex("", idx.id, idx.url, idx.sha1);
   onStep?.("Asset objects…");
-  await ensureAssetObjects("", indexData, (d, t) => onStep?.(`assets ${d}/${t}`));
+  await ensureAssetObjects(
+    "",
+    indexData,
+    (d, t) => onStep?.(`assets ${d}/${t}`),
+    idx.id,
+    idx.sha1,
+  );
 
   return merged;
 }

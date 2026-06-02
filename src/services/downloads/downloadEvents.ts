@@ -17,8 +17,10 @@ export function subscribeDownloadProgress(
 }
 
 export interface GameLogLine {
-  stream: string;
+  instanceId: string;
+  stream: "stdout" | "stderr";
   line: string;
+  timestamp: string;
 }
 
 export function subscribeGameLog(cb: (l: GameLogLine) => void): Promise<UnlistenFn> {
@@ -26,6 +28,7 @@ export function subscribeGameLog(cb: (l: GameLogLine) => void): Promise<Unlisten
 }
 
 export interface GameExit {
+  instanceId: string;
   code: number | null;
   success: boolean;
 }

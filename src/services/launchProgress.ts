@@ -1,5 +1,5 @@
 /**
- * Launch progress system
+ * Launch progress system.
  * Allows launchInstance to emit structured progress steps to the UI.
  */
 
@@ -23,6 +23,55 @@ export interface LaunchProgress {
   percent: number | null;
   detail?: string;
 }
+
+// ─── LaunchProfiler ──────────────────────────────────────────────────────────
+
+export interface LaunchTiming {
+  stage: string;
+  startedAt: number;
+  endedAt?: number;
+  durationMs?: number;
+}
+
+class LaunchProfiler {
+  private timings: Map<string, LaunchTiming> = new Map();
+  private order: string[] = [];
+
+  start(stage: string): void {
+    this.timings.set(stage, { stage, startedAt: performance.now() });
+    if (!this.order.includes(stage)) this.order.push(stage);
+  }
+
+  end(stage: string): void {
+    const t = this.timings.get(stage);
+    if (!t) return;
+    t.endedAt = performance.now();
+    t.durationMs = Math.round(t.endedAt - t.startedAt);
+  }
+
+  /** Format all completed timings as log lines. */
+  summary(): string[] {
+    return this.order
+      .map((s) => this.timings.get(s))
+      .filter((t): t is LaunchTiming => !!t?.durationMs)
+      .map((t) => `[LaunchProfiler] ${t.stage}: ${t.durationMs}ms`);
+  }
+
+  reset(): void {
+    this.timings.clear();
+    this.order = [];
+  }
+
+  getAll(): LaunchTiming[] {
+    return this.order
+      .map((s) => this.timings.get(s))
+      .filter((t): t is LaunchTiming => !!t);
+  }
+}
+
+export const profiler = new LaunchProfiler();
+
+// ─── Progress pub/sub ─────────────────────────────────────────────────────────
 
 type ProgressListener = (p: LaunchProgress) => void;
 
@@ -55,6 +104,7 @@ export function emitLaunchProgress(p: LaunchProgress): void {
 }
 
 export function resetLaunchProgress(): void {
+  profiler.reset();
   emitLaunchProgress({ phase: "idle", label: "", percent: null });
 }
 

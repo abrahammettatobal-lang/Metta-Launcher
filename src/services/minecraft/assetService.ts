@@ -5,6 +5,10 @@ import {
   readTextFile,
   sha1FileCmd,
 } from "../bridge";
+import {
+  isAssetIndexValidated,
+  markAssetIndexValidated,
+} from "./launchCache";
 
 export interface AssetIndex {
   objects: Record<string, { hash: string; size: number }>;
@@ -35,7 +39,17 @@ export async function ensureAssetObjects(
   _root: string,
   index: AssetIndex,
   onProgress?: (done: number, total: number) => void,
+  indexId?: string,
+  indexSha1?: string,
 ): Promise<void> {
+  // Fast path: if all assets were validated in a previous launch and the
+  // asset index SHA-1 hasn't changed, skip the entire 12 000-item loop.
+  if (indexId && indexSha1 && await isAssetIndexValidated(indexId, indexSha1)) {
+    const total = Object.keys(index.objects).length;
+    onProgress?.(total, total);
+    return;
+  }
+
   const entries = Object.values(index.objects);
   let done = 0;
   for (const v of entries) {
@@ -48,5 +62,10 @@ export async function ensureAssetObjects(
     }
     done++;
     onProgress?.(done, entries.length);
+  }
+
+  // Persist the cache so the next launch can skip this loop.
+  if (indexId && indexSha1) {
+    await markAssetIndexValidated(indexId, indexSha1);
   }
 }

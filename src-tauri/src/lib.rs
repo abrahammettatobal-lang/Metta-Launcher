@@ -553,7 +553,11 @@ pub struct SpawnLaunchRequest {
   pub cwd: String,
   pub args: Vec<String>,
   pub env: Vec<(String, String)>,
+<<<<<<< HEAD
   pub instance_id: Option<String>,
+=======
+  pub instance_id: String,
+>>>>>>> ebd7683 (Add sponsor badge, live logs, launch optimizations, and web sponsor section)
 }
 
 #[tauri::command]
@@ -578,6 +582,7 @@ fn spawn_java_game(
     req.args,
     req.cwd,
     req.env,
+    req.instance_id,
   )
 }
 

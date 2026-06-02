@@ -1,5 +1,5 @@
 import { openPath } from "@tauri-apps/plugin-opener";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Link, useNavigate } from "react-router-dom";
 import {
@@ -20,6 +20,7 @@ import {
   type LaunchProgress,
 } from "../services/launchProgress";
 import { cancelCurrentLaunch, launchInstance } from "../services/launchInstance";
+import { diagnoseLaunchFailure, type LaunchDiagnosis } from "../services/minecraft/errorDiagnostics";
 import { logAppend } from "../services/bridge";
 import { listMods } from "../services/modsService";
 import { fetchMojangNews, type MojangNewsEntry } from "../services/mojangNews";
@@ -60,6 +61,7 @@ export function Dashboard() {
   const [progress, setProgress] = useState<LaunchProgress | null>(null);
   const [modCounts, setModCounts] = useState<Record<string, number>>({});
   const [news, setNews] = useState<MojangNewsEntry[]>([]);
+<<<<<<< HEAD
   const [history, setHistory] = useState<
     Array<{
       instanceName: string | null;
@@ -67,6 +69,10 @@ export function Dashboard() {
       success: boolean;
     }>
   >([]);
+=======
+  const [diagnosis, setDiagnosis] = useState<LaunchDiagnosis | null>(null);
+  const recentGameLinesRef = useRef<string[]>([]);
+>>>>>>> ebd7683 (Add sponsor badge, live logs, launch optimizations, and web sponsor section)
 
   const load = useCallback(async () => {
     const [i, a, logs, hist] = await Promise.all([
@@ -128,6 +134,7 @@ export function Dashboard() {
   useEffect(() => {
     let a: (() => void) | undefined;
     let b: (() => void) | undefined;
+<<<<<<< HEAD
     void (async () => {
       const verbose = (await settingGet("verboseGameLogs")) === "true";
       if (!verbose) return;
@@ -136,6 +143,14 @@ export function Dashboard() {
       });
       a = unsub;
     })();
+=======
+    void subscribeGameLog((l) => {
+      recentGameLinesRef.current = [...recentGameLinesRef.current.slice(-199), l.line];
+      void logAppend("game", "info", `[${l.stream}] ${l.line}`, sel || undefined);
+    }).then((x) => {
+      a = x;
+    });
+>>>>>>> ebd7683 (Add sponsor badge, live logs, launch optimizations, and web sponsor section)
     void subscribeGameExit((e) => {
       void logAppend(
         "launcher",
@@ -143,6 +158,13 @@ export function Dashboard() {
         `Juego terminado code=${e.code}`,
         sel || undefined,
       );
+      if (!e.success) {
+        const d = diagnoseLaunchFailure(recentGameLinesRef.current, e.code);
+        if (d) setDiagnosis(d);
+      } else {
+        setDiagnosis(null);
+      }
+      recentGameLinesRef.current = [];
       setBusy(false);
       void load();
     }).then((y) => {
@@ -221,6 +243,49 @@ export function Dashboard() {
         }
       />
 
+<<<<<<< HEAD
+=======
+      {/* Crash diagnosis banner */}
+      <AnimatePresence>
+        {diagnosis && (
+          <motion.div
+            key="diagnosis"
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            transition={{ duration: 0.2 }}
+            className="relative overflow-hidden rounded-2xl border border-red-900/50 bg-red-950/25 p-5 backdrop-blur-sm"
+          >
+            <button
+              type="button"
+              onClick={() => setDiagnosis(null)}
+              className="absolute right-4 top-4 rounded-lg p-1 text-ink-faint hover:text-ink"
+            >
+              <IconX width={14} height={14} />
+            </button>
+            <div className="flex items-start gap-4">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-red-900/40 text-[16px]">
+                ⚠
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="mb-0.5 text-[13px] font-semibold text-red-200">{diagnosis.title}</p>
+                <p className="mb-3 text-[12px] text-red-300/80">{diagnosis.cause}</p>
+                <ul className="space-y-1">
+                  {diagnosis.suggestions.map((s, i) => (
+                    <li key={i} className="flex items-start gap-2 text-[11.5px] text-ink-muted">
+                      <span className="mt-0.5 h-1.5 w-1.5 shrink-0 rounded-full bg-gold/60" />
+                      {s}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Hero */}
+>>>>>>> ebd7683 (Add sponsor badge, live logs, launch optimizations, and web sponsor section)
       {cur ? (
         <Hero
           title={cur.name}

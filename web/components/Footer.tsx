@@ -10,6 +10,7 @@ import {
   RELEASE_URL,
   REPO_URL,
 } from "@/data/downloads";
+import { SponsorBadge } from "./SponsorBadge";
 
 const year = new Date().getFullYear();
 
@@ -95,6 +96,10 @@ export function Footer() {
               Minecraft es una marca registrada de Mojang Studios.
             </span>
           </div>
+        </div>
+
+        <div className="mt-5 flex justify-start sm:justify-end">
+          <SponsorBadge compact />
         </div>
       </div>
     </footer>
