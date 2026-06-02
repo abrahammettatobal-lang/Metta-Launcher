@@ -61,7 +61,6 @@ export function Dashboard() {
   const [progress, setProgress] = useState<LaunchProgress | null>(null);
   const [modCounts, setModCounts] = useState<Record<string, number>>({});
   const [news, setNews] = useState<MojangNewsEntry[]>([]);
-<<<<<<< HEAD
   const [history, setHistory] = useState<
     Array<{
       instanceName: string | null;
@@ -69,10 +68,8 @@ export function Dashboard() {
       success: boolean;
     }>
   >([]);
-=======
   const [diagnosis, setDiagnosis] = useState<LaunchDiagnosis | null>(null);
   const recentGameLinesRef = useRef<string[]>([]);
->>>>>>> ebd7683 (Add sponsor badge, live logs, launch optimizations, and web sponsor section)
 
   const load = useCallback(async () => {
     const [i, a, logs, hist] = await Promise.all([
@@ -134,23 +131,15 @@ export function Dashboard() {
   useEffect(() => {
     let a: (() => void) | undefined;
     let b: (() => void) | undefined;
-<<<<<<< HEAD
     void (async () => {
       const verbose = (await settingGet("verboseGameLogs")) === "true";
       if (!verbose) return;
       const unsub = await subscribeGameLog((l) => {
+        recentGameLinesRef.current = [...recentGameLinesRef.current.slice(-199), l.line];
         void logAppend("game", "info", `[${l.stream}] ${l.line}`, sel || undefined);
       });
       a = unsub;
     })();
-=======
-    void subscribeGameLog((l) => {
-      recentGameLinesRef.current = [...recentGameLinesRef.current.slice(-199), l.line];
-      void logAppend("game", "info", `[${l.stream}] ${l.line}`, sel || undefined);
-    }).then((x) => {
-      a = x;
-    });
->>>>>>> ebd7683 (Add sponsor badge, live logs, launch optimizations, and web sponsor section)
     void subscribeGameExit((e) => {
       void logAppend(
         "launcher",
@@ -243,8 +232,6 @@ export function Dashboard() {
         }
       />
 
-<<<<<<< HEAD
-=======
       {/* Crash diagnosis banner */}
       <AnimatePresence>
         {diagnosis && (
@@ -283,9 +270,6 @@ export function Dashboard() {
           </motion.div>
         )}
       </AnimatePresence>
-
-      {/* Hero */}
->>>>>>> ebd7683 (Add sponsor badge, live logs, launch optimizations, and web sponsor section)
       {cur ? (
         <Hero
           title={cur.name}

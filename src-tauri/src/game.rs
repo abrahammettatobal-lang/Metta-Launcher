@@ -3,11 +3,7 @@ use serde::Serialize;
 use std::io::{BufRead, BufReader};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU32, Ordering};
-<<<<<<< HEAD
-use std::sync::Arc;
-=======
-use std::sync::{Mutex, OnceLock};
->>>>>>> ebd7683 (Add sponsor badge, live logs, launch optimizations, and web sponsor section)
+use std::sync::{Arc, Mutex, OnceLock};
 use tauri::AppHandle;
 use tauri::Emitter;
 

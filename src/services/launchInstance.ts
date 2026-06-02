@@ -322,11 +322,7 @@ async function runLaunchPipeline(instanceId: string): Promise<void> {
     cwd: rep.game_directory,
     args: argv,
     env: [["METTA_LAUNCHER", "1"]],
-<<<<<<< HEAD
-    instanceId: inst.id,
-=======
     instanceId,
->>>>>>> ebd7683 (Add sponsor badge, live logs, launch optimizations, and web sponsor section)
   });
   profiler.end("Proceso Java");
   progressRunning();

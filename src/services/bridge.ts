@@ -229,11 +229,7 @@ export async function spawnJavaGame(payload: {
   cwd: string;
   args: string[];
   env: [string, string][];
-<<<<<<< HEAD
   instanceId?: string;
-=======
-  instanceId: string;
->>>>>>> ebd7683 (Add sponsor badge, live logs, launch optimizations, and web sponsor section)
 }): Promise<void> {
   await invoke("spawn_java_game", { req: payload });
 }

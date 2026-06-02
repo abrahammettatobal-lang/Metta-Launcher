@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-import { useCallback, useEffect, useMemo, useState } from "react";
-=======
 import { useCallback, useEffect, useRef, useState } from "react";
->>>>>>> ebd7683 (Add sponsor badge, live logs, launch optimizations, and web sponsor section)
 import { logsClear, logsQuery } from "../services/bridge";
 import {
   subscribeGameLog,
@@ -14,18 +10,8 @@ import { subscribeLaunchProgress, type LaunchProgress } from "../services/launch
 import { diagnoseLaunchFailure, type LaunchDiagnosis } from "../services/minecraft/errorDiagnostics";
 import { Topbar } from "../ui/Topbar";
 import { Card } from "../ui/Card";
-<<<<<<< HEAD
-import { Field, FieldSelect } from "../ui/Field";
-import {
-  IconCopy,
-  IconDownload,
-  IconRefresh,
-  IconTrash,
-} from "../ui/icons";
-=======
 import { FieldSelect } from "../ui/Field";
 import { IconCopy, IconDownload, IconRefresh, IconTrash, IconX } from "../ui/icons";
->>>>>>> ebd7683 (Add sponsor badge, live logs, launch optimizations, and web sponsor section)
 import { tap } from "../utils/tap";
 import { cx } from "../ui/cx";
 import { AnimatePresence, motion } from "framer-motion";
@@ -87,21 +73,6 @@ function stageLabel(phase: LaunchProgress["phase"]): string {
 }
 
 export function LogsPage() {
-<<<<<<< HEAD
-  const [level, setLevel] = useState("");
-  const [source, setSource] = useState("");
-  const [search, setSearch] = useState("");
-  const [autoScroll, setAutoScroll] = useState(true);
-  const [lines, setLines] = useState<
-    Array<{
-      id: number;
-      level: string;
-      source: string;
-      message: string;
-      createdAt: string;
-    }>
-  >([]);
-=======
   const [dbEntries, setDbEntries] = useState<LogEntry[]>([]);
   const [liveEntries, setLiveEntries] = useState<LogEntry[]>([]);
   const [levelFilter, setLevelFilter] = useState("");
@@ -112,7 +83,6 @@ export function LogsPage() {
   const [launchState, setLaunchState] = useState<LaunchProgress | null>(null);
   const [diagnosis, setDiagnosis] = useState<LaunchDiagnosis | null>(null);
   const [showDiagnosis, setShowDiagnosis] = useState(false);
->>>>>>> ebd7683 (Add sponsor badge, live logs, launch optimizations, and web sponsor section)
 
   const listRef = useRef<HTMLDivElement>(null);
   const pausedRef = useRef(false);
@@ -140,25 +110,6 @@ export function LogsPage() {
     void loadDb();
   }, [loadDb]);
 
-<<<<<<< HEAD
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return lines;
-    return lines.filter(
-      (l) =>
-        l.message.toLowerCase().includes(q) ||
-        l.source.toLowerCase().includes(q) ||
-        l.level.toLowerCase().includes(q),
-    );
-  }, [lines, search]);
-
-  const text = filtered
-    .map(
-      (l) =>
-        `${new Date(l.createdAt).toLocaleString("es")} [${l.source}/${l.level}] ${l.message}`,
-    )
-    .join("\n");
-=======
   // Subscribe to live game-log events
   useEffect(() => {
     let unlisten: (() => void) | undefined;
@@ -260,7 +211,6 @@ export function LogsPage() {
     setDiagnosis(null);
     setShowDiagnosis(false);
   };
->>>>>>> ebd7683 (Add sponsor badge, live logs, launch optimizations, and web sponsor section)
 
   return (
     <div className="space-y-5">
@@ -399,29 +349,6 @@ export function LogsPage() {
             <option value="game">game</option>
             <option value="download">download</option>
           </FieldSelect>
-<<<<<<< HEAD
-          <Field
-            label="Buscar"
-            placeholder="Filtrar por texto…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="min-w-[200px] flex-1"
-          />
-          <label className="flex items-center gap-2 text-[12px] text-ink-muted">
-            <input
-              type="checkbox"
-              checked={autoScroll}
-              onChange={(e) => setAutoScroll(e.target.checked)}
-              className="rounded border-line"
-            />
-            Autoscroll
-          </label>
-          <div className="ml-auto rounded-xl border border-line bg-canvas-deep/40 px-3 py-2 text-[11.5px] text-ink-muted">
-            <span className="font-display text-[14px] font-semibold text-ink">
-              {filtered.length}
-            </span>{" "}
-            <span className="text-ink-faint">entradas</span>
-=======
           <div className="flex-1">
             <label className="mb-1 block text-[11px] font-medium uppercase tracking-[0.1em] text-ink-faint">
               Buscar
@@ -433,45 +360,12 @@ export function LogsPage() {
               placeholder="Filtrar por texto…"
               className="w-full rounded-xl border border-line bg-canvas-raised/40 px-3 py-2 text-[12.5px] text-ink placeholder:text-ink-faint focus:border-gold/50 focus:outline-none focus:ring-1 focus:ring-gold/20"
             />
->>>>>>> ebd7683 (Add sponsor badge, live logs, launch optimizations, and web sponsor section)
           </div>
         </div>
       </Card>
 
       {/* Log list */}
       <Card padding="none" className="overflow-hidden">
-<<<<<<< HEAD
-        <div className="scrollbar-thin max-h-[min(60vh,32rem)] overflow-y-auto">
-          {filtered.length === 0 ? (
-            <div className="px-6 py-12 text-center text-[12.5px] text-ink-faint">
-              No hay entradas que coincidan con los filtros.
-            </div>
-          ) : (
-            <ul className="divide-y divide-line/70">
-              {filtered.map((l) => (
-                <li
-                  key={l.id}
-                  className="grid grid-cols-[88px_64px_70px_1fr] items-start gap-3 px-5 py-2.5 font-mono text-[11.5px] leading-relaxed transition-colors duration-150 hover:bg-canvas-raised/30"
-                >
-                  <span className="text-ink-faint">
-                    {new Date(l.createdAt).toLocaleTimeString("es")}
-                  </span>
-                  <LevelBadge level={l.level} />
-                  <span className="text-ink-muted">{l.source}</span>
-                  <span
-                    className={cx(
-                      "whitespace-pre-wrap break-words",
-                      l.level === "error"
-                        ? "text-red-300"
-                        : l.level === "warn"
-                          ? "text-amber-200"
-                          : "text-ink-soft",
-                    )}
-                  >
-                    {l.message}
-                  </span>
-                </li>
-=======
         <div
           ref={listRef}
           className="scrollbar-thin max-h-[min(65vh,38rem)] overflow-y-auto"
@@ -491,7 +385,6 @@ export function LogsPage() {
             <ul className="divide-y divide-line/50">
               {visible.map((l) => (
                 <LogRow key={`${l.id}-${l.ts}`} entry={l} search={search} />
->>>>>>> ebd7683 (Add sponsor badge, live logs, launch optimizations, and web sponsor section)
               ))}
             </ul>
           )}

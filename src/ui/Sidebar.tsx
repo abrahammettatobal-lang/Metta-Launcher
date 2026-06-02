@@ -17,13 +17,10 @@ import {
 } from "./icons";
 import type { ReactNode } from "react";
 import { isWindowsClient } from "../services/bedrock";
-<<<<<<< HEAD
 import { accountsList, type AccountRow } from "../services/bridge";
 import { Avatar } from "./Avatar";
 import { getVersion } from "@tauri-apps/api/app";
-=======
 import { SponsorBadge } from "../components/sponsors/SponsorBadge";
->>>>>>> ebd7683 (Add sponsor badge, live logs, launch optimizations, and web sponsor section)
 
 interface NavItem {
   to: string;
@@ -135,7 +132,6 @@ export function Sidebar({ status }: SidebarProps) {
           ))}
         </nav>
 
-<<<<<<< HEAD
         <div className="mt-auto space-y-2.5 border-t border-line/80 px-3 py-4">
           {account ? (
             <NavLink
@@ -169,11 +165,7 @@ export function Sidebar({ status }: SidebarProps) {
               Iniciar sesión
             </NavLink>
           )}
-=======
-        {/* Status footer */}
-        <div className="mt-5 space-y-3 border-t border-line pt-4">
           <SponsorBadge compact />
->>>>>>> ebd7683 (Add sponsor badge, live logs, launch optimizations, and web sponsor section)
           <StatusBlock status={status} />
         </div>
       </div>
