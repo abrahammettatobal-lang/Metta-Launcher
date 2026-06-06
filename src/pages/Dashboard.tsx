@@ -128,42 +128,53 @@ export function Dashboard() {
     };
   }, []);
 
+  const selRef = useRef(sel);
+  selRef.current = sel;
+  const loadRef = useRef(load);
+  loadRef.current = load;
+
   useEffect(() => {
-    let a: (() => void) | undefined;
-    let b: (() => void) | undefined;
+    let unsubLog: (() => void) | undefined;
+    let unsubExit: (() => void) | undefined;
     void (async () => {
-      const verbose = (await settingGet("verboseGameLogs")) === "true";
-      if (!verbose) return;
-      const unsub = await subscribeGameLog((l) => {
+      unsubLog = await subscribeGameLog((l) => {
         recentGameLinesRef.current = [...recentGameLinesRef.current.slice(-199), l.line];
-        void logAppend("game", "info", `[${l.stream}] ${l.line}`, sel || undefined);
+        void (async () => {
+          const verbose = (await settingGet("verboseGameLogs")) === "true";
+          if (verbose) {
+            await logAppend("game", "info", `[${l.stream}] ${l.line}`, selRef.current || undefined);
+          }
+        })();
       });
-      a = unsub;
+      unsubExit = await subscribeGameExit((e) => {
+        const logLines = e.logTail ?? e.stderrTail ?? [];
+        const lines = [...recentGameLinesRef.current, ...logLines];
+        const d = diagnoseLaunchFailure(lines, e.code);
+        const tail = lines.slice(-8).join(" | ");
+        const detail = d ? `${d.title}: ${d.cause}` : tail || "Sin salida del juego capturada.";
+        void logAppend(
+          "launcher",
+          e.success ? "info" : "error",
+          e.success
+            ? `Juego terminado code=${e.code}`
+            : `Juego terminado code=${e.code} — ${detail}`,
+          selRef.current || undefined,
+        );
+        if (!e.success) {
+          if (d) setDiagnosis(d);
+        } else {
+          setDiagnosis(null);
+        }
+        recentGameLinesRef.current = [];
+        setBusy(false);
+        void loadRef.current();
+      });
     })();
-    void subscribeGameExit((e) => {
-      void logAppend(
-        "launcher",
-        e.success ? "info" : "error",
-        `Juego terminado code=${e.code}`,
-        sel || undefined,
-      );
-      if (!e.success) {
-        const d = diagnoseLaunchFailure(recentGameLinesRef.current, e.code);
-        if (d) setDiagnosis(d);
-      } else {
-        setDiagnosis(null);
-      }
-      recentGameLinesRef.current = [];
-      setBusy(false);
-      void load();
-    }).then((y) => {
-      b = y;
-    });
     return () => {
-      a?.();
-      b?.();
+      unsubLog?.();
+      unsubExit?.();
     };
-  }, [sel, load]);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;

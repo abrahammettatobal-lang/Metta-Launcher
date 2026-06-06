@@ -23,13 +23,31 @@ interface ErrorPattern {
 
 const PATTERNS: ErrorPattern[] = [
   {
-    regex: /UnsupportedClassVersionError/,
+    regex: /UnsupportedClassVersionError|has been compiled by a more recent version of the Java Runtime|class file version 6[5-9]\.0/i,
     title: "Java incorrecto",
-    cause: "La versión de Java instalada es demasiado antigua para esta versión de Minecraft.",
+    cause: "La versión de Java es demasiado antigua para esta versión de Minecraft.",
     suggestions: [
-      "Instala Java 21 LTS desde Settings → Java.",
-      "Para Minecraft 1.17+, necesitas Java 16 o superior.",
-      "Para Minecraft 1.20.5+, necesitas Java 21.",
+      "Minecraft 26.x requiere Java 25 (Temurin 25).",
+      "Minecraft 1.20.5+ requiere Java 21.",
+      "En Ajustes → Java, limpia la ruta y deja que Metta descargue la versión correcta.",
+    ],
+  },
+  {
+    regex: /Unrecognized option:|Could not create the Java Virtual Machine/i,
+    title: "Opción JVM no compatible",
+    cause: "Esta versión de Minecraft incluye flags de Java que tu JDK no soporta, o necesitas una versión más reciente.",
+    suggestions: [
+      "Minecraft 26.x requiere Java 25 (Temurin 25).",
+      "En Ajustes → Java, limpia la ruta y vuelve a lanzar para descargar la versión correcta.",
+    ],
+  },
+  {
+    regex: /Only one quick play option can be specified|IllegalArgumentException.*quick play/i,
+    title: "Argumentos de lanzamiento inválidos",
+    cause: "Se pasaron opciones de Quick Play duplicadas o vacías al iniciar Minecraft.",
+    suggestions: [
+      "Actualiza Metta Launcher a la última versión.",
+      "Si persiste, borra la instancia y créala de nuevo.",
     ],
   },
   {
@@ -69,6 +87,15 @@ const PATTERNS: ErrorPattern[] = [
     suggestions: [
       "Instala la dependencia indicada en los logs.",
       "Descarga el mod desde Modrinth o CurseForge.",
+    ],
+  },
+  {
+    regex: /ClassNotFoundException: net\.minecraft\.client\.main\.Main|no se ha encontrado o cargado la clase principal net\.minecraft/i,
+    title: "Classpath inválido",
+    cause: "Java no pudo cargar el cliente de Minecraft (classpath o rutas incorrectas).",
+    suggestions: [
+      "Actualiza Metta Launcher a la última versión.",
+      "Repara la instancia o borra libraries y vuelve a lanzar.",
     ],
   },
   {

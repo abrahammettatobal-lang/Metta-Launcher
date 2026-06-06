@@ -438,6 +438,18 @@ pub fn recommended_java_major(mc_version: &str) -> u8 {
     .split('.')
     .filter_map(|p| p.parse().ok())
     .collect();
+  if parts.is_empty() {
+    return 21;
+  }
+  // Minecraft 26+ (class file 69) requires Java 25.
+  if parts[0] >= 26 {
+    return 25;
+  }
+  // Other post-1.x versioning (future-proof).
+  if parts[0] > 1 {
+    return 21;
+  }
+  // Classic 1.x scheme.
   if parts.len() >= 2 {
     let minor = parts[1];
     if minor >= 21 || (parts.len() >= 3 && parts[1] == 20 && parts[2] >= 5) {

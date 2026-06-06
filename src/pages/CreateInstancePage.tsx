@@ -62,7 +62,9 @@ export function CreateInstancePage() {
     void fetchVersionManifest().then((m) => {
       const ids = m.versions.map((v) => v.id).slice(0, 80);
       setVersions(ids);
-      if (!mc && ids[0]) setMc(ids[0]);
+      if (!mc) {
+        setMc(m.latest.release || ids.find((id) => !id.includes("pre")) || ids[0] || "");
+      }
     });
   }, [mc]);
 

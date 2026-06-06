@@ -180,6 +180,12 @@ export async function pathExists(path: string): Promise<boolean> {
   return invoke("path_exists", { path });
 }
 
+/** One IPC round-trip to find which relative paths are missing (not regular files). */
+export async function missingPathsCmd(paths: string[]): Promise<string[]> {
+  if (paths.length === 0) return [];
+  return invoke("missing_paths_cmd", { paths });
+}
+
 export async function mkdirAllCmd(path: string): Promise<void> {
   await invoke("mkdir_all_cmd", { path });
 }

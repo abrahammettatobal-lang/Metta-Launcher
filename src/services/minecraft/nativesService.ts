@@ -1,33 +1,56 @@
 import {
   downloadFileCmd,
   extractZipCmd,
+  missingPathsCmd,
   mkdirAllCmd,
-  pathExists,
   writeTextFile,
 } from "../bridge";
-import type { McOs } from "./os";
+import { detectMcArch, detectMcOs } from "./os";
 import type { LibraryEntry } from "./libraryService";
-import { nativeArtifactForOs } from "./libraryService";
+import { nativeArtifactsForOs } from "./libraryService";
 
 export async function extractNativesForVersion(
   libraries: LibraryEntry[],
-  os: McOs,
+  os = detectMcOs(),
   _librariesRoot: string,
   nativesOutRel: string,
-): Promise<void> {
+): Promise<number> {
   const out = nativesOutRel.replace(/\\/g, "/");
   await mkdirAllCmd(out);
+  const arch = detectMcArch();
+
+  const nativeLibs: Array<{
+    relLib: string;
+    stamp: string;
+    url?: string;
+    sha1?: string;
+  }> = [];
+
   for (const lib of libraries) {
-    const nat = nativeArtifactForOs(lib, os);
+    const nat = nativeArtifactsForOs(lib, os, arch);
     if (!nat) continue;
     const relLib = `shared/libraries/${nat.relPath}`.replace(/\\/g, "/");
-    if (!(await pathExists(relLib))) {
-      if (!nat.url) continue;
-      await downloadFileCmd(`native-${nat.relPath}`, nat.url, relLib, nat.sha1 ?? null);
-    }
     const stamp = `${out}/.${nat.relPath.replace(/[^\w.-]+/g, "_")}.extracted`;
-    if (await pathExists(stamp)) continue;
-    await extractZipCmd(relLib, out);
-    await writeTextFile(stamp, "ok");
+    nativeLibs.push({ relLib, stamp, url: nat.url, sha1: nat.sha1 ?? undefined });
   }
+
+  if (nativeLibs.length === 0) return 0;
+
+  const libPaths = nativeLibs.map((n) => n.relLib);
+  const stampPaths = nativeLibs.map((n) => n.stamp);
+  const missingLibs = new Set(await missingPathsCmd(libPaths));
+  const missingStamps = new Set(await missingPathsCmd(stampPaths));
+
+  for (const nat of nativeLibs) {
+    if (missingLibs.has(nat.relLib)) {
+      if (!nat.url) continue;
+      await downloadFileCmd(`native-${nat.relLib}`, nat.url, nat.relLib, nat.sha1 ?? null);
+    }
+    if (missingStamps.has(nat.stamp)) {
+      await extractZipCmd(nat.relLib, out);
+      await writeTextFile(nat.stamp, "ok");
+    }
+  }
+
+  return nativeLibs.length;
 }

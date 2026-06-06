@@ -1,5 +1,6 @@
 import {
   downloadFileCmd,
+  missingPathsCmd,
   mkdirAllCmd,
   pathExists,
   readTextFile,
@@ -44,27 +45,45 @@ export async function ensureAssetObjects(
 ): Promise<void> {
   // Fast path: if all assets were validated in a previous launch and the
   // asset index SHA-1 hasn't changed, skip the entire 12 000-item loop.
-  if (indexId && indexSha1 && await isAssetIndexValidated(indexId, indexSha1)) {
+  if (indexId && indexSha1 && (await isAssetIndexValidated(indexId, indexSha1))) {
     const total = Object.keys(index.objects).length;
     onProgress?.(total, total);
     return;
   }
 
   const entries = Object.values(index.objects);
-  let done = 0;
-  for (const v of entries) {
+  const total = entries.length;
+  onProgress?.(0, total);
+
+  const relPaths = entries.map((v) => {
     const p1 = v.hash.slice(0, 2);
-    const rel = `shared/assets/objects/${p1}/${v.hash}`;
-    const norm = rel.replace(/\\/g, "/");
-    if (!(await pathExists(norm))) {
-      const url = `https://resources.download.minecraft.net/${p1}/${v.hash}`;
-      await downloadFileCmd(`asset-${v.hash}`, url, norm, v.hash);
+    return `shared/assets/objects/${p1}/${v.hash}`.replace(/\\/g, "/");
+  });
+
+  // Single native batch check instead of thousands of IPC round-trips.
+  const missingSet = new Set(await missingPathsCmd(relPaths));
+  onProgress?.(total - missingSet.size, total);
+
+  if (missingSet.size === 0) {
+    if (indexId && indexSha1) {
+      await markAssetIndexValidated(indexId, indexSha1);
     }
-    done++;
-    onProgress?.(done, entries.length);
+    onProgress?.(total, total);
+    return;
   }
 
-  // Persist the cache so the next launch can skip this loop.
+  let done = total - missingSet.size;
+  for (let i = 0; i < entries.length; i++) {
+    const v = entries[i];
+    const rel = relPaths[i];
+    if (!missingSet.has(rel)) continue;
+    const p1 = v.hash.slice(0, 2);
+    const url = `https://resources.download.minecraft.net/${p1}/${v.hash}`;
+    await downloadFileCmd(`asset-${v.hash}`, url, rel, v.hash);
+    done++;
+    onProgress?.(done, total);
+  }
+
   if (indexId && indexSha1) {
     await markAssetIndexValidated(indexId, indexSha1);
   }

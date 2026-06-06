@@ -140,7 +140,8 @@ export function LogsPage() {
     let unlisten: (() => void) | undefined;
     void subscribeGameExit((e: GameExit) => {
       if (!e.success) {
-        const d = diagnoseLaunchFailure(recentLinesRef.current, e.code);
+        const lines = [...recentLinesRef.current, ...(e.logTail ?? e.stderrTail ?? [])];
+        const d = diagnoseLaunchFailure(lines, e.code);
         if (d) {
           setDiagnosis(d);
           setShowDiagnosis(true);

@@ -31,6 +31,8 @@ export interface GameExit {
   instanceId: string;
   code: number | null;
   success: boolean;
+  logTail?: string[];
+  stderrTail?: string[];
 }
 
 export function subscribeGameExit(cb: (e: GameExit) => void): Promise<UnlistenFn> {

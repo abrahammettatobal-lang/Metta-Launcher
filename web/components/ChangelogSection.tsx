@@ -11,6 +11,25 @@ interface ChangeGroup {
 
 const CHANGELOG: ChangeGroup[] = [
   {
+    version: "0.6.0",
+    date: "Junio 2026",
+    highlights: [
+      "Lanzamiento de Minecraft 26.x con Java 25 (Temurin) y detección automática de versión.",
+      "Corrección crítica en Windows: rutas extendidas (//?/) ya no rompen el classpath.",
+      "Extracción de natives para el formato MC 26 y validación de assets mucho más rápida.",
+      "Lanzamiento vía @argfile, diagnóstico de crashes con log de stdout y menos conflictos JVM (G1GC vs ZGC).",
+      "Selección inteligente de Java por versión de Minecraft y descarga automática desde Adoptium.",
+    ],
+  },
+  {
+    version: "0.5.0",
+    date: "Junio 2026",
+    highlights: [
+      "Badge de patrocinador en app y web, logs en vivo y optimizaciones de lanzamiento.",
+      "Mejoras de rendimiento en descargas y preparación de instancias.",
+    ],
+  },
+  {
     version: "0.4.0",
     date: "Mayo 2026",
     highlights: [

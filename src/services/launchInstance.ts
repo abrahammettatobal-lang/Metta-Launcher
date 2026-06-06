@@ -13,7 +13,7 @@ import type { InstanceRow } from "./bridge";
 import { installFabricSide } from "./minecraft/fabricInstaller";
 import { installForgeSide } from "./minecraft/forgeInstaller";
 import { installNeoForgeSide } from "./minecraft/neoforgeInstaller";
-import { buildLaunchCommand, type LaunchReplacements } from "./minecraft/launchCommandService";
+import { buildLaunchCommand, filterLaunchArgsForJava, type LaunchReplacements } from "./minecraft/launchCommandService";
 import {
   libraryArtifactRef,
   mergeInheritedVersionJson,
@@ -24,6 +24,7 @@ import { installVanillaSide } from "./minecraft/vanillaInstaller";
 import { uuidWithHyphens } from "./minecraft/uuidFmt";
 import { ensureJava } from "./minecraft/javaManager";
 import { writeLaunchCache } from "./minecraft/launchCache";
+import { simplifyPath } from "../utils/full-path";
 import {
   profiler,
   progressPreparing,
@@ -44,7 +45,7 @@ export { listForgeVersions } from "./minecraft/forgeInstaller";
 export { listNeoForgeVersions } from "./minecraft/neoforgeInstaller";
 
 function abs(root: string, rel: string): string {
-  const a = root.replace(/\\/g, "/").replace(/\/+$/, "");
+  const a = simplifyPath(root).replace(/\/+$/, "");
   const b = rel.replace(/\\/g, "/").replace(/^\/+/, "");
   return `${a}/${b}`;
 }
@@ -164,7 +165,7 @@ async function runLaunchPipeline(instanceId: string): Promise<void> {
   checkAbort();
   profiler.start("Java");
   progressJava("Buscando Java instalado…");
-  const { javaPath } = await ensureJava(inst.javaPath, async (msg) => {
+  const { javaPath } = await ensureJava(inst.javaPath, inst.minecraftVersion, async (msg) => {
     progressJava(msg);
     await log("info", msg, instanceId);
   });
@@ -187,14 +188,16 @@ async function runLaunchPipeline(instanceId: string): Promise<void> {
           profiler.start("Assets");
           progressAssets(Number(d), Number(t));
         }
-      } else if (m.includes("native")) {
-        profiler.end("Assets");
-        profiler.start("Natives");
-        progressNatives(m);
-      } else if (m.includes("librar")) {
-        progressLibraries(m);
+      } else {
+        if (m.includes("native")) {
+          profiler.end("Assets");
+          profiler.start("Natives");
+          progressNatives(m);
+        } else if (m.includes("librar")) {
+          progressLibraries(m);
+        }
+        await log("info", m, instanceId);
       }
-      await log("info", m, instanceId);
     });
     profiler.end("Natives");
   } else if (inst.loaderType === "fabric") {
@@ -209,14 +212,16 @@ async function runLaunchPipeline(instanceId: string): Promise<void> {
           profiler.start("Assets");
           progressAssets(Number(d), Number(t));
         }
-      } else if (m.includes("native")) {
-        profiler.end("Assets");
-        profiler.start("Natives");
-        progressNatives(m);
-      } else if (m.includes("librar")) {
-        progressLibraries(m);
+      } else {
+        if (m.includes("native")) {
+          profiler.end("Assets");
+          profiler.start("Natives");
+          progressNatives(m);
+        } else if (m.includes("librar")) {
+          progressLibraries(m);
+        }
+        await log("info", m, instanceId);
       }
-      await log("info", m, instanceId);
     });
     profiler.end("Natives");
     profiler.start("Loader");
@@ -281,7 +286,7 @@ async function runLaunchPipeline(instanceId: string): Promise<void> {
     assets_root: abs(root, "shared/assets"),
     assets_index_name: merged.assetIndex?.id ?? "legacy",
     launcher_name: "MettaLauncher",
-    launcher_version: "0.4.0",
+    launcher_version: "0.6.0",
     classpath,
     library_directory: abs(root, "shared/libraries"),
     natives_directory: abs(root, nativesRel),
@@ -298,14 +303,17 @@ async function runLaunchPipeline(instanceId: string): Promise<void> {
     extraGame.push("--width", w.trim(), "--height", h.trim());
   }
 
-  const argv = buildLaunchCommand(
-    merged,
-    os,
-    rep,
-    extraJvm,
-    extraGame,
-    Number(inst.minRamMb),
-    Number(inst.maxRamMb),
+  const argv = filterLaunchArgsForJava(
+    buildLaunchCommand(
+      merged,
+      os,
+      rep,
+      extraJvm,
+      extraGame,
+      Number(inst.minRamMb),
+      Number(inst.maxRamMb),
+    ),
+    javaPath,
   );
 
   // ─── Log profiler timings ────────────────────────────────────────────────────

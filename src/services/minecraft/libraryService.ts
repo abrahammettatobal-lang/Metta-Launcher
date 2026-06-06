@@ -1,4 +1,4 @@
-import type { McOs } from "./os";
+import type { McArch, McOs } from "./os";
 import { fetchVersionManifest } from "./versionManifestService";
 
 export interface LibraryDownloads {
@@ -60,6 +60,25 @@ export function libraryAllowed(lib: LibraryEntry, os: McOs): boolean {
   return ruleApplies(lib.rules, os, { has_custom_resolution: false });
 }
 
+/** Librerías cuyo artefacto es solo natives (MC 1.20.5+ / 26.x), no van al classpath. */
+export function isNativeLibraryName(name: string | undefined): boolean {
+  return !!name && name.includes(":natives-");
+}
+
+function nativeSuffixFor(os: McOs, arch: McArch): string {
+  if (os === "windows") {
+    if (arch === "arm64") return ":natives-windows-arm64";
+    if (arch === "x86") return ":natives-windows-x86";
+    return ":natives-windows";
+  }
+  if (os === "osx") {
+    if (arch === "arm64") return ":natives-macos-arm64";
+    return ":natives-macos";
+  }
+  if (arch === "arm64") return ":natives-linux-arm64";
+  return ":natives-linux";
+}
+
 function mavenPathFromName(name: string): string {
   const parts = name.split(":");
   if (parts.length < 3) throw new Error(`Nombre de librería inválido: ${name}`);
@@ -77,6 +96,7 @@ export function libraryArtifactRef(
   os: McOs,
 ): { relPath: string; sha1?: string; url?: string } | null {
   if (!libraryAllowed(lib, os)) return null;
+  if (isNativeLibraryName(lib.name)) return null;
   if (lib.downloads?.artifact) {
     return {
       relPath: lib.downloads.artifact.path,
@@ -91,6 +111,23 @@ export function libraryArtifactRef(
   return null;
 }
 
+export function nativeStandaloneArtifactForOs(
+  lib: LibraryEntry,
+  os: McOs,
+  arch: McArch,
+): { relPath: string; sha1?: string; url?: string } | null {
+  if (!libraryAllowed(lib, os) || !lib.downloads?.artifact) return null;
+  const name = lib.name ?? "";
+  if (!isNativeLibraryName(name)) return null;
+  if (!name.endsWith(nativeSuffixFor(os, arch))) return null;
+  return {
+    relPath: lib.downloads.artifact.path,
+    sha1: lib.downloads.artifact.sha1,
+    url: lib.downloads.artifact.url,
+  };
+}
+
+/** Formato clásico: librería con `natives` + `classifiers`. */
 export function nativeArtifactForOs(
   lib: LibraryEntry,
   os: McOs,
@@ -103,6 +140,15 @@ export function nativeArtifactForOs(
   const c = lib.downloads.classifiers[ck];
   if (!c) return null;
   return { relPath: c.path, sha1: c.sha1, url: c.url };
+}
+
+/** Cualquier artefacto native aplicable a esta plataforma. */
+export function nativeArtifactsForOs(
+  lib: LibraryEntry,
+  os: McOs,
+  arch: McArch,
+): { relPath: string; sha1?: string; url?: string } | null {
+  return nativeArtifactForOs(lib, os) ?? nativeStandaloneArtifactForOs(lib, os, arch);
 }
 
 export async function mergeInheritedVersionJson(

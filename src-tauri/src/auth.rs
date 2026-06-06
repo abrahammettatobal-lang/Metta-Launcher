@@ -396,8 +396,10 @@ pub async fn ensure_valid_secrets(
 
 pub fn offline_session(username: &str) -> MinecraftSession {
   let uuid = offline_uuid(username);
+  // Mojang acepta el UUID sin guiones como token en cuentas offline.
+  let access_token = uuid.as_simple().to_string();
   MinecraftSession {
-    access_token: "-".into(),
+    access_token,
     uuid: uuid.to_string(),
     username: username.to_string(),
     user_type: "legacy".into(),

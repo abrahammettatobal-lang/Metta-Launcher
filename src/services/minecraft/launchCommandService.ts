@@ -68,6 +68,15 @@ function flatten(parts: ArgPiece[] | undefined, os: McOs, feats: Record<string, 
   return out;
 }
 
+const GC_FLAG =
+  /^-XX:\+Use(G1GC|ZGC|SerialGC|ParallelGC)|^-XX:G1|^-XX:\+UnlockExperimentalVMOptions/;
+
+/** Drop global G1 flags when Mojang's version JSON already defines JVM options. */
+function sanitizeExtraJvm(extraJvm: string[], jvmPieces: string[]): string[] {
+  if (jvmPieces.length === 0) return extraJvm;
+  return extraJvm.filter((f) => !GC_FLAG.test(f.trim()));
+}
+
 function substitute(s: string, rep: LaunchReplacements): string {
   return s
     .replaceAll("${auth_player_name}", rep.auth_player_name)
@@ -104,7 +113,6 @@ export function buildLaunchCommand(
   const jvm: string[] = [];
   jvm.push(`-Xms${minMb}M`);
   jvm.push(`-Xmx${maxMb}M`);
-  jvm.push(...extraJvm);
 
   const jvmPieces =
     v.arguments?.jvm && v.arguments.jvm.length > 0
@@ -112,6 +120,8 @@ export function buildLaunchCommand(
           substitute(part, rep2),
         )
       : [];
+
+  jvm.push(...sanitizeExtraJvm(extraJvm, jvmPieces));
 
   if (jvmPieces.length > 0) {
     jvm.push(...jvmPieces);
@@ -130,9 +140,26 @@ export function buildLaunchCommand(
     );
   } else if (v.arguments?.game) {
     for (const part of flatten(v.arguments.game as ArgPiece[], os, { has_custom_resolution: false })) {
-      game.push(substitute(part, rep2));
+      const subbed = substitute(part, rep2);
+      if (subbed) game.push(subbed);
     }
   }
   game.push(...extraGame);
   return [...jvm, ...game];
+}
+
+/** Strip JVM flags that require a newer JDK than the one in use. */
+export function filterLaunchArgsForJava(argv: string[], javaPath: string): string[] {
+  const m = javaPath.match(/jdk-(\d+)/i) || javaPath.match(/jre-(\d+)/i);
+  const major = m ? Number(m[1]) : 21;
+  const minMajor: Record<string, number> = {
+    "--sun-misc-unsafe-memory-access": 25,
+    "--enable-native-access": 21,
+  };
+  return argv.filter((arg) => {
+    for (const [prefix, need] of Object.entries(minMajor)) {
+      if (arg.startsWith(prefix) && major < need) return false;
+    }
+    return true;
+  });
 }

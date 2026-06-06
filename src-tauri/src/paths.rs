@@ -1,5 +1,33 @@
 use std::path::{Component, Path, PathBuf};
 
+/// Strip Windows extended-length prefixes so JVM/classpath can resolve jar paths.
+pub fn strip_extended_path_prefix(raw: &str) -> String {
+  let s = raw.trim();
+  if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
+    return format!(r"\\{rest}");
+  }
+  if let Some(rest) = s.strip_prefix(r"\\?\") {
+    return rest.to_string();
+  }
+  if let Some(rest) = s.strip_prefix("//?/UNC/") {
+    return format!("//{rest}");
+  }
+  if let Some(rest) = s.strip_prefix("//?/") {
+    return rest.to_string();
+  }
+  s.to_string()
+}
+
+/// Canonicalize when possible and return a normal path (no `\\?\` prefix).
+pub fn normalize_launcher_root(raw: &Path) -> PathBuf {
+  if raw.exists() {
+    if let Ok(canon) = dunce::canonicalize(raw) {
+      return dunce::simplified(&canon).to_path_buf();
+    }
+  }
+  PathBuf::from(strip_extended_path_prefix(&raw.to_string_lossy()))
+}
+
 pub fn sanitize_instance_name(name: &str) -> Result<String, String> {
   let trimmed = name.trim();
   if trimmed.is_empty() {

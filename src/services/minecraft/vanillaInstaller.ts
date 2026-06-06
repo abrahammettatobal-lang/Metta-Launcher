@@ -1,5 +1,6 @@
 import {
   downloadFileCmd,
+  missingPathsCmd,
   mkdirAllCmd,
   pathExists,
   readTextFile,
@@ -41,17 +42,29 @@ export async function installVanillaSide(
   }
 
   onStep?.("Downloading libraries…");
+  const libDownloads: Array<{
+    rel: string;
+    url: string;
+    sha1?: string;
+  }> = [];
   for (const lib of merged.libraries) {
     const art = libraryArtifactRef(lib, os);
-    if (!art) continue;
-    const rel = `shared/libraries/${art.relPath}`;
-    if (await pathExists(rel)) continue;
-    if (!art.url) continue;
-    await downloadFileCmd(`lib-${art.relPath}`, art.url, rel, art.sha1 ?? null);
+    if (!art?.url) continue;
+    libDownloads.push({
+      rel: `shared/libraries/${art.relPath}`.replace(/\\/g, "/"),
+      url: art.url,
+      sha1: art.sha1,
+    });
+  }
+  const missingLibs = new Set(await missingPathsCmd(libDownloads.map((l) => l.rel)));
+  for (const lib of libDownloads) {
+    if (!missingLibs.has(lib.rel)) continue;
+    await downloadFileCmd(`lib-${lib.rel}`, lib.url, lib.rel, lib.sha1 ?? null);
   }
 
   onStep?.("Extracting natives…");
-  await extractNativesForVersion(merged.libraries, os, "", nativesRel);
+  const nativeCount = await extractNativesForVersion(merged.libraries, os, "", nativesRel);
+  onStep?.(`Extracted ${nativeCount} native bundles`);
 
   const idx = merged.assetIndex;
   if (!idx) throw new Error("Version JSON missing assetIndex");

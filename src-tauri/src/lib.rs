@@ -33,12 +33,15 @@ pub struct AppPaths {
 }
 
 fn launcher_root_path(db: &Db) -> PathBuf {
-  db.setting_get("launcherRoot")
+  let raw = db
+    .setting_get("launcherRoot")
     .ok()
     .flatten()
     .filter(|s| !s.trim().is_empty())
+    .map(|s| paths::strip_extended_path_prefix(&s))
     .map(PathBuf::from)
-    .unwrap_or_else(paths::default_launcher_root)
+    .unwrap_or_else(paths::default_launcher_root);
+  paths::normalize_launcher_root(&raw)
 }
 
 const DEFAULT_JVM_ARGS: &str = "-XX:+UnlockExperimentalVMOptions\n-XX:+UseG1GC\n-XX:G1NewSizePercent=20\n-XX:G1ReservePercent=20\n-XX:MaxGCPauseMillis=50\n-XX:G1HeapRegionSize=16M";
@@ -108,13 +111,14 @@ fn app_paths(app: AppHandle, state: State<'_, AppState>) -> Result<AppPaths, Str
   let app_data = app.path().app_data_dir().map_err(|e| e.to_string())?;
   let db_path = app_data.join("metta.db");
   let root = launcher_root_path(&state.db);
+  let root_display = dunce::simplified(&root).to_string_lossy().to_string();
   Ok(AppPaths {
     app_data_dir: app_data.to_string_lossy().to_string(),
     db_path: db_path.to_string_lossy().to_string(),
-    default_launcher_root: paths::default_launcher_root()
+    default_launcher_root: paths::normalize_launcher_root(&paths::default_launcher_root())
       .to_string_lossy()
       .to_string(),
-    launcher_root: root.to_string_lossy().to_string(),
+    launcher_root: root_display,
   })
 }
 
@@ -132,10 +136,10 @@ fn setting_set(state: State<'_, AppState>, key: String, value: String) -> Result
 fn launcher_set_root(state: State<'_, AppState>, path: String) -> Result<(), String> {
   let p = PathBuf::from(&path);
   std::fs::create_dir_all(&p).map_err(|e| e.to_string())?;
-  let canon = p.canonicalize().map_err(|e| e.to_string())?;
+  let simple = paths::normalize_launcher_root(&p);
   state
     .db
-    .setting_set("launcherRoot", &canon.to_string_lossy())
+    .setting_set("launcherRoot", &simple.to_string_lossy())
 }
 
 #[tauri::command]
@@ -258,8 +262,19 @@ async fn get_launch_session(
     .find(|a| a.id == account_id)
     .ok_or_else(|| "Cuenta no encontrada.".to_string())?;
   if acc.kind == "offline" {
+    let token = acc
+      .uuid
+      .replace('-', "")
+      .chars()
+      .filter(|c| c.is_ascii_hexdigit())
+      .collect::<String>();
+    let access_token = if token.len() == 32 {
+      token
+    } else {
+      auth::offline_uuid(&acc.username).as_simple().to_string()
+    };
     return Ok(LaunchSession {
-      access_token: "-".into(),
+      access_token,
       uuid: acc.uuid,
       username: acc.username,
       user_type: "legacy".into(),
@@ -416,6 +431,23 @@ fn path_exists(state: State<'_, AppState>, path: String) -> Result<bool, String>
   Ok(p.exists())
 }
 
+/// Returns relative paths (under launcher root) that are missing or not regular files.
+#[tauri::command]
+fn missing_paths_cmd(state: State<'_, AppState>, paths: Vec<String>) -> Result<Vec<String>, String> {
+  let mut missing = Vec::new();
+  for path in paths {
+    match resolve_under_launcher_root(&state.db, &path) {
+      Ok(p) => {
+        if !p.is_file() {
+          missing.push(path);
+        }
+      }
+      Err(_) => missing.push(path),
+    }
+  }
+  Ok(missing)
+}
+
 #[tauri::command]
 fn mkdir_all_cmd(state: State<'_, AppState>, path: String) -> Result<(), String> {
   let p = resolve_under_launcher_root(&state.db, &path)?;
@@ -523,7 +555,8 @@ pub struct RunJavaRequest {
 fn run_java_jar(state: State<'_, AppState>, req: RunJavaRequest) -> Result<String, String> {
   let jar = resolve_under_launcher_root(&state.db, &req.jar_path)?;
   let cwd = resolve_under_launcher_root(&state.db, &req.work_dir)?;
-  let java = req.java_path;
+  let root = launcher_root_path(&state.db);
+  let java = java::resolve_java_executable(&root, &req.java_path)?;
   let mut cmd = Command::new(&java);
   cmd
     .arg("-jar")
@@ -564,6 +597,8 @@ fn spawn_java_game(
 ) -> Result<(), String> {
   let cwd = PathBuf::from(&req.cwd);
   std::fs::create_dir_all(&cwd).map_err(|e| e.to_string())?;
+  let root = launcher_root_path(&state.db);
+  let java = java::resolve_java_executable(&root, &req.java_path)?;
   let history_id = if let Some(ref id) = req.instance_id {
     let _ = state.db.instance_touch_last_played(id);
     state.db.launch_history_insert_start(id).ok()
@@ -574,7 +609,7 @@ fn spawn_java_game(
     app,
     state.db.clone(),
     history_id,
-    req.java_path,
+    java.to_string_lossy().to_string(),
     req.args,
     req.cwd,
     req.env,
@@ -643,6 +678,7 @@ pub fn run() {
       write_text_file,
       write_binary_file,
       path_exists,
+      missing_paths_cmd,
       mkdir_all_cmd,
       remove_file_cmd,
       move_path_cmd,

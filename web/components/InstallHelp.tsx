@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { RELEASE_VERSION } from "@/data/downloads";
 import { IconApple, IconLinux, IconWindows } from "./Icons";
 
 type Tab = "windows" | "macos" | "linux";
@@ -179,17 +180,17 @@ function LinuxHelp() {
         <CommandBlock
           title="Debian / Ubuntu / Pop!_OS / Mint"
           format="DEB"
-          command="sudo apt install ./Metta.Launcher_0.4.0_amd64.deb"
+          command={`sudo apt install ./Metta.Launcher_${RELEASE_VERSION}_amd64.deb`}
         />
         <CommandBlock
           title="Fedora / RHEL / openSUSE"
           format="RPM"
-          command="sudo rpm -i ./Metta.Launcher-0.4.0-1.x86_64.rpm"
+          command={`sudo rpm -i ./Metta.Launcher-${RELEASE_VERSION}-1.x86_64.rpm`}
         />
         <CommandBlock
           title="Universal (cualquier distro)"
           format="AppImage"
-          command={`chmod +x Metta.Launcher_0.4.0_amd64.AppImage\n./Metta.Launcher_0.4.0_amd64.AppImage`}
+          command={`chmod +x Metta.Launcher_${RELEASE_VERSION}_amd64.AppImage\n./Metta.Launcher_${RELEASE_VERSION}_amd64.AppImage`}
         />
       </div>
 
