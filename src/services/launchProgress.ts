@@ -118,8 +118,17 @@ export function progressJava(detail?: string): void {
   emitLaunchProgress({ phase: "java", label: "Verificando Java…", percent: 5, detail });
 }
 
-export function progressLibraries(detail?: string): void {
-  emitLaunchProgress({ phase: "libraries", label: "Descargando librerías…", percent: 30, detail });
+export function progressLibraries(detail?: string, done?: number, total?: number): void {
+  let percent = 30;
+  if (done !== undefined && total !== undefined && total > 0) {
+    percent = 22 + Math.round((done / total) * 10);
+  }
+  emitLaunchProgress({
+    phase: "libraries",
+    label: "Descargando librerías…",
+    percent,
+    detail,
+  });
 }
 
 export function progressAssets(done: number, total: number, detail?: string): void {

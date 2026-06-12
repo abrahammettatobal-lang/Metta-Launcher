@@ -7,7 +7,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const host = process.env.TAURI_DEV_HOST;
 
-export default defineConfig(async () => ({
+export default defineConfig(() => ({
+  // Required for Tauri production builds (tauri:// / asset protocol).
+  base: "./",
   plugins: [react()],
   resolve: {
     alias: {
@@ -15,6 +17,12 @@ export default defineConfig(async () => ({
     },
   },
   clearScreen: false,
+  envPrefix: ["VITE_", "TAURI_ENV_*"],
+  build: {
+    target: process.env.TAURI_ENV_PLATFORM === "windows" ? "chrome105" : "safari13",
+    minify: process.env.TAURI_ENV_DEBUG ? false : ("esbuild" as const),
+    sourcemap: !!process.env.TAURI_ENV_DEBUG,
+  },
   server: {
     port: 1420,
     strictPort: true,

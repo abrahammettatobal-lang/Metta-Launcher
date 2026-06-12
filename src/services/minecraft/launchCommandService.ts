@@ -77,6 +77,17 @@ function sanitizeExtraJvm(extraJvm: string[], jvmPieces: string[]): string[] {
   return extraJvm.filter((f) => !GC_FLAG.test(f.trim()));
 }
 
+function normalizeJvmFlag(s: string): string {
+  const trimmed = s.trim();
+  if (trimmed.startsWith("-D") && trimmed.includes("=")) {
+    const eq = trimmed.indexOf("=");
+    const key = trimmed.slice(0, eq).trimEnd();
+    const val = trimmed.slice(eq + 1).trim();
+    return `${key}=${val}`;
+  }
+  return trimmed;
+}
+
 function substitute(s: string, rep: LaunchReplacements): string {
   return s
     .replaceAll("${auth_player_name}", rep.auth_player_name)
@@ -117,7 +128,7 @@ export function buildLaunchCommand(
   const jvmPieces =
     v.arguments?.jvm && v.arguments.jvm.length > 0
       ? flatten(v.arguments.jvm as ArgPiece[], os, { has_custom_resolution: false }).map((part) =>
-          substitute(part, rep2),
+          normalizeJvmFlag(substitute(part, rep2)),
         )
       : [];
 

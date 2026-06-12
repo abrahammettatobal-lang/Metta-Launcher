@@ -159,6 +159,10 @@ export function LogsPage() {
   useEffect(() => {
     return subscribeLaunchProgress((p) => {
       setLaunchState(p.phase === "idle" ? null : p);
+      if (p.phase === "starting" || p.phase === "running") {
+        setDiagnosis(null);
+        setShowDiagnosis(false);
+      }
     });
   }, []);
 

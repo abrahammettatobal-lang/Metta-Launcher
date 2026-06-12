@@ -8,6 +8,9 @@ export interface LibraryDownloads {
 
 export interface LibraryEntry {
   name?: string;
+  /** Maven repository base (Fabric: https://maven.fabricmc.net/). */
+  url?: string;
+  sha1?: string;
   downloads?: LibraryDownloads;
   rules?: Array<{
     action: "allow" | "disallow";
@@ -91,6 +94,13 @@ function mavenPathFromName(name: string): string {
   return `${groupPath}/${artifact}/${version}/${artifact}-${version}.${ext}`;
 }
 
+function artifactUrlForMavenName(name: string, repoBase?: string): string {
+  const rel = mavenPathFromName(name);
+  const base = repoBase?.trim().replace(/\/+$/, "");
+  if (base) return `${base}/${rel}`;
+  return `https://libraries.minecraft.net/${rel}`;
+}
+
 export function libraryArtifactRef(
   lib: LibraryEntry,
   os: McOs,
@@ -106,7 +116,11 @@ export function libraryArtifactRef(
   }
   if (lib.name) {
     const rel = mavenPathFromName(lib.name);
-    return { relPath: rel, url: `https://libraries.minecraft.net/${rel}` };
+    return {
+      relPath: rel,
+      sha1: lib.sha1,
+      url: artifactUrlForMavenName(lib.name, lib.url),
+    };
   }
   return null;
 }

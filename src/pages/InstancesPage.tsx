@@ -14,6 +14,7 @@ import {
   instanceRestoreBackup,
   instanceSave,
   instancesList,
+  instancesSync,
   type BackupListItem,
   type InstanceRow,
 } from "../services/bridge";
@@ -40,6 +41,7 @@ export function InstancesPage() {
   const nav = useNavigate();
 
   const reload = useCallback(async () => {
+    await instancesSync();
     const r = await instancesList();
     setRows(r);
     const m: Record<string, number> = {};

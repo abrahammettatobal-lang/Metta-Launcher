@@ -387,6 +387,9 @@ pub fn instance_get(db: &Db, id: &str) -> Result<Option<InstanceRow>, String> {
 pub fn instance_delete(db: &Db, id: &str) -> Result<(), String> {
   let conn = db.conn.lock().map_err(|e| e.to_string())?;
   conn
+    .execute("DELETE FROM launch_history WHERE instance_id = ?1", params![id])
+    .map_err(|e| e.to_string())?;
+  conn
     .execute("DELETE FROM instances WHERE id = ?1", params![id])
     .map_err(|e| e.to_string())?;
   Ok(())

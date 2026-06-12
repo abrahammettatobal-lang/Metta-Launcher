@@ -5,6 +5,7 @@ mod bedrock;
 mod db;
 mod download;
 mod game;
+mod instances;
 mod java;
 mod paths;
 mod system;
@@ -73,6 +74,7 @@ fn ensure_folders_and_defaults(db: &Db) -> Result<(), String> {
       db.setting_set("javaPath", &f.path)?;
     }
   }
+  let _ = instances::sync_instances_from_disk(db);
   Ok(())
 }
 
@@ -182,12 +184,21 @@ fn instance_get(state: State<'_, AppState>, id: String) -> Result<Option<Instanc
 
 #[tauri::command]
 fn instance_save(state: State<'_, AppState>, row: InstanceRow) -> Result<(), String> {
-  db::instance_upsert(&state.db, &row)
+  db::instance_upsert(&state.db, &row)?;
+  instances::write_instance_meta(&state.db, &row)
 }
 
 #[tauri::command]
 fn instance_delete(state: State<'_, AppState>, id: String) -> Result<(), String> {
-  db::instance_delete(&state.db, &id)
+  let row = db::instance_get(&state.db, &id)?
+    .ok_or_else(|| "Instancia no encontrada.".to_string())?;
+  db::instance_delete(&state.db, &id)?;
+  instances::remove_instance_files(&state.db, &row)
+}
+
+#[tauri::command]
+fn instances_sync(state: State<'_, AppState>) -> Result<u32, String> {
+  instances::sync_instances_from_disk(&state.db)
 }
 
 #[tauri::command]
@@ -666,6 +677,7 @@ pub fn run() {
       instance_get,
       instance_save,
       instance_delete,
+      instances_sync,
       accounts_list,
       account_delete,
       account_set_active,

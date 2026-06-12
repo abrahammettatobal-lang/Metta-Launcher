@@ -11,6 +11,16 @@ interface ChangeGroup {
 
 const CHANGELOG: ChangeGroup[] = [
   {
+    version: "0.7.0",
+    date: "Junio 2026",
+    highlights: [
+      "Fix pantalla negra en macOS Intel: assets relativos y HashRouter para Tauri.",
+      "Fabric: descarga correcta desde maven.fabricmc.net y progreso por librería.",
+      "Eliminar instancia borra la carpeta en disco; reimportación tras reinstalar el launcher.",
+      "Metadatos .metta-instance.json en cada instancia para recuperar mundos y configuración.",
+    ],
+  },
+  {
     version: "0.6.0",
     date: "Junio 2026",
     highlights: [

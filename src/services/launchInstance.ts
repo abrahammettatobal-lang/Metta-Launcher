@@ -20,7 +20,7 @@ import {
   type McVersionJson,
 } from "./minecraft/libraryService";
 import { detectMcOs } from "./minecraft/os";
-import { installVanillaSide } from "./minecraft/vanillaInstaller";
+import { installVanillaSide, ensureLibrariesDownloaded } from "./minecraft/vanillaInstaller";
 import { uuidWithHyphens } from "./minecraft/uuidFmt";
 import { ensureJava } from "./minecraft/javaManager";
 import { writeLaunchCache } from "./minecraft/launchCache";
@@ -179,7 +179,7 @@ async function runLaunchPipeline(instanceId: string): Promise<void> {
   if (inst.loaderType === "vanilla") {
     profiler.start("Librerías");
     progressLibraries("Vanilla: instalando librerías…");
-    merged = await installVanillaSide(inst.minecraftVersion, os, nativesRel, async (m) => {
+    merged = await installVanillaSide(inst.minecraftVersion, os, nativesRel, async (m, done, total) => {
       if (m.startsWith("assets ")) {
         const [, rest] = m.split(" ");
         const [d, t] = rest.split("/");
@@ -193,8 +193,8 @@ async function runLaunchPipeline(instanceId: string): Promise<void> {
           profiler.end("Assets");
           profiler.start("Natives");
           progressNatives(m);
-        } else if (m.includes("librar")) {
-          progressLibraries(m);
+        } else if (m.includes("librar") || m.startsWith("Downloading ") || m.startsWith("Downloaded ")) {
+          progressLibraries(m, done, total);
         }
         await log("info", m, instanceId);
       }
@@ -203,7 +203,7 @@ async function runLaunchPipeline(instanceId: string): Promise<void> {
   } else if (inst.loaderType === "fabric") {
     profiler.start("Librerías");
     progressLibraries("Vanilla: instalando librerías base…");
-    await installVanillaSide(inst.minecraftVersion, os, nativesRel, async (m) => {
+    await installVanillaSide(inst.minecraftVersion, os, nativesRel, async (m, done, total) => {
       if (m.startsWith("assets ")) {
         const [, rest] = m.split(" ");
         const [d, t] = rest.split("/");
@@ -217,8 +217,8 @@ async function runLaunchPipeline(instanceId: string): Promise<void> {
           profiler.end("Assets");
           profiler.start("Natives");
           progressNatives(m);
-        } else if (m.includes("librar")) {
-          progressLibraries(m);
+        } else if (m.includes("librar") || m.startsWith("Downloading ") || m.startsWith("Downloaded ")) {
+          progressLibraries(m, done, total);
         }
         await log("info", m, instanceId);
       }
@@ -227,6 +227,10 @@ async function runLaunchPipeline(instanceId: string): Promise<void> {
     profiler.start("Loader");
     progressLoader(`Fabric: instalando loader ${inst.loaderVersion}…`);
     merged = await installFabricSide(inst.minecraftVersion, inst.loaderVersion);
+    await ensureLibrariesDownloaded(merged, os, async (m, done, total) => {
+      progressLibraries(m, done, total);
+      await log("info", m, instanceId);
+    });
     profiler.end("Loader");
   } else if (inst.loaderType === "forge") {
     profiler.start("Librerías");
@@ -286,7 +290,7 @@ async function runLaunchPipeline(instanceId: string): Promise<void> {
     assets_root: abs(root, "shared/assets"),
     assets_index_name: merged.assetIndex?.id ?? "legacy",
     launcher_name: "MettaLauncher",
-    launcher_version: "0.6.0",
+    launcher_version: "0.7.0",
     classpath,
     library_directory: abs(root, "shared/libraries"),
     natives_directory: abs(root, nativesRel),

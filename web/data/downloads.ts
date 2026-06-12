@@ -1,4 +1,4 @@
-export const RELEASE_VERSION = "0.6.0";
+export const RELEASE_VERSION = "0.7.0";
 export const REPO_URL = "https://github.com/abrahammettatobal-lang/Metta-Launcher";
 export const RELEASE_URL = `${REPO_URL}/releases/tag/v${RELEASE_VERSION}`;
 export const RELEASE_BASE = `${REPO_URL}/releases/download/v${RELEASE_VERSION}`;

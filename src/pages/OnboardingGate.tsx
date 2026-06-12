@@ -19,13 +19,25 @@ export function OnboardingGate({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     void (async () => {
-      const done = await settingGet("onboardingComplete");
-      setShow(done !== "true");
-      setReady(true);
+      try {
+        const done = await settingGet("onboardingComplete");
+        setShow(done !== "true");
+      } catch {
+        setShow(true);
+      } finally {
+        setReady(true);
+      }
     })();
   }, []);
 
-  if (!ready) return null;
+  if (!ready) {
+    return (
+      <div className="flex h-full min-h-[400px] flex-col items-center justify-center gap-3">
+        <div className="h-8 w-8 animate-pulse rounded-xl border border-gold-500/30 bg-gold-haze/20" />
+        <p className="text-[13px] text-ink-muted">Cargando Metta Launcher…</p>
+      </div>
+    );
+  }
   if (!show) return <>{children}</>;
 
   return (

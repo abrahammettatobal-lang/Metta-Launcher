@@ -91,6 +91,11 @@ export async function instanceDelete(id: string): Promise<void> {
   await invoke("instance_delete", { id });
 }
 
+/** Re-scan `instances/` on disk and import folders missing from the database. */
+export async function instancesSync(): Promise<number> {
+  return invoke("instances_sync");
+}
+
 export interface AccountRow {
   id: string;
   kind: string;

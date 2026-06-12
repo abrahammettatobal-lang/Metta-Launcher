@@ -20,7 +20,7 @@ export async function installVanillaSide(
   minecraftVersion: string,
   os: McOs,
   nativesRel: string,
-  onStep?: (msg: string) => void,
+  onStep?: (msg: string, done?: number, total?: number) => void,
 ): Promise<McVersionJson> {
   onStep?.("Fetching manifest…");
   const man = await fetchVersionManifest();
@@ -42,25 +42,7 @@ export async function installVanillaSide(
   }
 
   onStep?.("Downloading libraries…");
-  const libDownloads: Array<{
-    rel: string;
-    url: string;
-    sha1?: string;
-  }> = [];
-  for (const lib of merged.libraries) {
-    const art = libraryArtifactRef(lib, os);
-    if (!art?.url) continue;
-    libDownloads.push({
-      rel: `shared/libraries/${art.relPath}`.replace(/\\/g, "/"),
-      url: art.url,
-      sha1: art.sha1,
-    });
-  }
-  const missingLibs = new Set(await missingPathsCmd(libDownloads.map((l) => l.rel)));
-  for (const lib of libDownloads) {
-    if (!missingLibs.has(lib.rel)) continue;
-    await downloadFileCmd(`lib-${lib.rel}`, lib.url, lib.rel, lib.sha1 ?? null);
-  }
+  await ensureLibrariesDownloaded(merged, os, onStep);
 
   onStep?.("Extracting natives…");
   const nativeCount = await extractNativesForVersion(merged.libraries, os, "", nativesRel);
@@ -80,4 +62,35 @@ export async function installVanillaSide(
   );
 
   return merged;
+}
+
+/** Download any library artifacts from a merged version JSON that are not on disk yet. */
+export async function ensureLibrariesDownloaded(
+  merged: McVersionJson,
+  os: McOs,
+  onStep?: (msg: string, done?: number, total?: number) => void,
+): Promise<void> {
+  const libDownloads: Array<{ rel: string; url: string; sha1?: string; label: string }> = [];
+  for (const lib of merged.libraries) {
+    const art = libraryArtifactRef(lib, os);
+    if (!art?.url) continue;
+    libDownloads.push({
+      rel: `shared/libraries/${art.relPath}`.replace(/\\/g, "/"),
+      url: art.url,
+      sha1: art.sha1,
+      label: lib.name ?? art.relPath.split("/").pop() ?? art.relPath,
+    });
+  }
+  const missingLibs = new Set(await missingPathsCmd(libDownloads.map((l) => l.rel)));
+  const pending = libDownloads.filter((l) => missingLibs.has(l.rel));
+  if (pending.length === 0) return;
+
+  onStep?.("Downloading libraries…", 0, pending.length);
+  let done = 0;
+  for (const lib of pending) {
+    onStep?.(`Downloading ${lib.label}…`, done, pending.length);
+    await downloadFileCmd(`lib-${lib.rel}`, lib.url, lib.rel, lib.sha1 ?? null);
+    done += 1;
+    onStep?.(`Downloaded ${lib.label}`, done, pending.length);
+  }
 }

@@ -118,6 +118,9 @@ export function Dashboard() {
         return;
       }
       setProgress(p);
+      if (p.phase === "starting" || p.phase === "running") {
+        setDiagnosis(null);
+      }
       if (p.phase === "done" || p.phase === "error") {
         setTimeout(() => setProgress(null), 2400);
       }
