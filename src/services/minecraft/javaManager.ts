@@ -1,6 +1,6 @@
 import {
   downloadFileCmd,
-  extractZipCmd,
+  extractArchiveCmd,
   javaDetect,
   listDirCmd,
   mkdirAllCmd,
@@ -12,6 +12,7 @@ import {
 } from "../bridge";
 import { fullPath, simplifyPath } from "../../utils/full-path";
 import { detectMcOs } from "./os";
+import { getHostPlatform, mapHostArch } from "../platform";
 
 export interface JavaEnsureResult {
   javaPath: string;
@@ -114,17 +115,17 @@ function adoptiumOs(): string {
   return os; // "windows" | "linux" match Adoptium
 }
 
-/** Map process.arch → Adoptium architecture */
-function adoptiumArch(): string {
-  const a = navigator.platform?.toLowerCase() ?? "";
-  if (a.includes("arm") || a.includes("aarch")) return "aarch64";
-  return "x64";
+/** Map process.arch → Adoptium architecture (uses Rust host arch on macOS). */
+async function adoptiumArch(): Promise<string> {
+  const host = await getHostPlatform();
+  const arch = mapHostArch(host.arch);
+  return arch === "arm64" ? "aarch64" : "x64";
 }
 
 /** Fetch the latest Adoptium Temurin download URL for the given major version. */
 async function fetchTemurinUrl(major: number): Promise<{ url: string; name: string }> {
   const os = adoptiumOs();
-  const arch = adoptiumArch();
+  const arch = await adoptiumArch();
   const imageType = "jdk";
   const url =
     `${ADOPTIUM_API}/assets/latest/${major}/hotspot` +
@@ -167,7 +168,7 @@ async function downloadBundledJava(
 
   onStep?.("[Java] Extracting Java…");
   await mkdirAllCmd(extractDir);
-  await extractZipCmd(archiveRel, extractDir);
+  await extractArchiveCmd(archiveRel, extractDir);
 
   const javaRel = await findJavaBinary(extractDir);
   const javaPath = await fullPath(javaRel);

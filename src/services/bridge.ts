@@ -223,7 +223,24 @@ export async function sha1FileCmd(path: string): Promise<string> {
 }
 
 export async function extractZipCmd(zipPath: string, destDir: string): Promise<void> {
-  await invoke("extract_zip_cmd", { zipPath, destDir });
+  await invoke("extract_archive_cmd", { archivePath: zipPath, destDir });
+}
+
+export async function extractArchiveCmd(archivePath: string, destDir: string): Promise<void> {
+  await invoke("extract_archive_cmd", { archivePath, destDir });
+}
+
+export interface HostPlatform {
+  os: string;
+  arch: string;
+}
+
+export async function hostPlatform(): Promise<HostPlatform> {
+  return invoke("host_platform");
+}
+
+export async function openDevtools(): Promise<void> {
+  await invoke("open_devtools");
 }
 
 export async function runJavaJar(payload: {

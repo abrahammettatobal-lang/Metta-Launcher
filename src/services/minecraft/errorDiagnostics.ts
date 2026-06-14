@@ -51,7 +51,27 @@ const PATTERNS: ErrorPattern[] = [
     ],
   },
   {
-    regex: /java\.lang\.OutOfMemoryError|GC overhead limit|Java heap space/,
+    regex: /Failed to retrieve profile key pair|InvalidCredentialsException|Status: 401/i,
+    title: "Sesión no válida para multijugador",
+    cause: "Minecraft no pudo autenticarse con los servidores de Mojang. Las cuentas offline no funcionan en servidores online como Hypixel.",
+    suggestions: [
+      "Ve a Cuentas → Iniciar sesión con Microsoft (cuenta con Minecraft Java comprado).",
+      "Si ya usas Microsoft, cierra sesión y vuelve a iniciar sesión para renovar el token.",
+      "Hypixel y otros servidores premium no aceptan cuentas offline/cracked.",
+    ],
+  },
+  {
+    regex: /Failed to fetch user properties|authentication servers are down/i,
+    title: "Error de autenticación Mojang",
+    cause: "No se pudo validar tu sesión con los servidores de Mojang.",
+    suggestions: [
+      "Comprueba tu conexión a internet.",
+      "Si usas cuenta Microsoft, vuelve a iniciar sesión en Cuentas.",
+      "Los servidores de Mojang pueden estar temporalmente caídos.",
+    ],
+  },
+  {
+    regex: /OutOfMemoryError|Java heap space/i,
     title: "Sin memoria (RAM)",
     cause: "Minecraft se quedó sin RAM durante la ejecución.",
     suggestions: [

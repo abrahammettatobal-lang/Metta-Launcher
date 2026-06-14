@@ -75,6 +75,10 @@ fn ensure_folders_and_defaults(db: &Db) -> Result<(), String> {
     }
   }
   let _ = instances::sync_instances_from_disk(db);
+  let auto_install = db.setting_get("autoInstallUpdates")?;
+  if auto_install.is_none() {
+    db.setting_set("autoInstallUpdates", "false")?;
+  }
   Ok(())
 }
 
@@ -525,9 +529,59 @@ fn sha1_file_cmd(state: State<'_, AppState>, path: String) -> Result<String, Str
 
 #[tauri::command]
 fn extract_zip_cmd(state: State<'_, AppState>, zip_path: String, dest_dir: String) -> Result<(), String> {
-  let zip_p = resolve_under_launcher_root(&state.db, &zip_path)?;
+  extract_archive_cmd(state, zip_path, dest_dir)
+}
+
+#[tauri::command]
+fn extract_archive_cmd(state: State<'_, AppState>, archive_path: String, dest_dir: String) -> Result<(), String> {
+  let archive_p = resolve_under_launcher_root(&state.db, &archive_path)?;
   let dest = resolve_under_launcher_root(&state.db, &dest_dir)?;
-  extract_zip_file(&zip_p, &dest)
+  extract_archive_file(&archive_p, &dest)
+}
+
+fn extract_archive_file(archive_path: &Path, out_dir: &Path) -> Result<(), String> {
+  std::fs::create_dir_all(out_dir).map_err(|e| e.to_string())?;
+  let name = archive_path.to_string_lossy().to_lowercase();
+  let result = if name.ends_with(".tar.gz") || name.ends_with(".tgz") {
+    extract_tar_gz(archive_path, out_dir)
+  } else {
+    extract_zip_file(archive_path, out_dir)
+  };
+  #[cfg(target_os = "macos")]
+  strip_macos_quarantine(out_dir);
+  result
+}
+
+#[cfg(unix)]
+fn extract_tar_gz(archive_path: &Path, out_dir: &Path) -> Result<(), String> {
+  let status = Command::new("tar")
+    .arg("-xzf")
+    .arg(archive_path)
+    .arg("-C")
+    .arg(out_dir)
+    .status()
+    .map_err(|e| format!("No se pudo ejecutar tar: {e}"))?;
+  if status.success() {
+    Ok(())
+  } else {
+    Err("No se pudo extraer el archivo .tar.gz".into())
+  }
+}
+
+#[cfg(not(unix))]
+fn extract_tar_gz(_archive_path: &Path, _out_dir: &Path) -> Result<(), String> {
+  Err("Extracción .tar.gz no soportada en esta plataforma.".into())
+}
+
+#[cfg(target_os = "macos")]
+fn strip_macos_quarantine(path: &Path) {
+  if let Some(s) = path.to_str() {
+    let _ = Command::new("xattr")
+      .args(["-dr", "com.apple.quarantine", s])
+      .stdout(Stdio::null())
+      .stderr(Stdio::null())
+      .status();
+  }
 }
 
 fn extract_zip_file(zip_path: &Path, out_dir: &Path) -> Result<(), String> {
@@ -663,6 +717,12 @@ pub fn run() {
         .build()
         .expect("http client");
       app.manage(AppState { db, http });
+
+      #[cfg(debug_assertions)]
+      if let Some(w) = app.get_webview_window("main") {
+        w.open_devtools();
+      }
+
       Ok(())
     })
     .invoke_handler(tauri::generate_handler![
@@ -699,6 +759,9 @@ pub fn run() {
       dir_disk_usage,
       sha1_file_cmd,
       extract_zip_cmd,
+      extract_archive_cmd,
+      host_platform,
+      open_devtools,
       run_java_jar,
       spawn_java_game,
       stop_java_game,
@@ -768,7 +831,31 @@ async fn launcher_check_update(state: State<'_, AppState>) -> Result<system::Lau
   Ok(system::check_launcher_update(&state.http).await)
 }
 
-#[tauri::command(rename_all = "camelCase")]
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HostPlatform {
+  pub os: String,
+  pub arch: String,
+}
+
+#[tauri::command]
+fn host_platform() -> HostPlatform {
+  HostPlatform {
+    os: std::env::consts::OS.to_string(),
+    arch: std::env::consts::ARCH.to_string(),
+  }
+}
+
+#[tauri::command]
+fn open_devtools(app: AppHandle) -> Result<(), String> {
+  app
+    .get_webview_window("main")
+    .ok_or_else(|| "Ventana principal no encontrada.".to_string())?
+    .open_devtools();
+  Ok(())
+}
+
+#[tauri::command]
 fn recommended_java(minecraft_version: String) -> u8 {
   system::recommended_java_major(&minecraft_version)
 }

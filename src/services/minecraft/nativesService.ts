@@ -5,7 +5,8 @@ import {
   mkdirAllCmd,
   writeTextFile,
 } from "../bridge";
-import { detectMcArch, detectMcOs } from "./os";
+import { detectMcOs } from "./os";
+import { resolveMcArch } from "../platform";
 import type { LibraryEntry } from "./libraryService";
 import { nativeArtifactsForOs } from "./libraryService";
 
@@ -17,7 +18,7 @@ export async function extractNativesForVersion(
 ): Promise<number> {
   const out = nativesOutRel.replace(/\\/g, "/");
   await mkdirAllCmd(out);
-  const arch = detectMcArch();
+  const arch = await resolveMcArch();
 
   const nativeLibs: Array<{
     relLib: string;

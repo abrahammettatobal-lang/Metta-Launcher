@@ -11,6 +11,7 @@
     "core:window:allow-set-focus",
     "core:window:allow-show",
     "core:window:allow-hide",
+    "core:webview:allow-internal-toggle-devtools",
     "opener:default",
     "dialog:default",
     "updater:default",

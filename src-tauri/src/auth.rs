@@ -388,6 +388,9 @@ pub async fn ensure_valid_secrets(
       if r.status().is_success() {
         return Ok(secrets);
       }
+      if r.status().as_u16() == 401 {
+        return refresh_microsoft_session(client, db, account_id).await;
+      }
     }
   }
 

@@ -86,7 +86,7 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
         setLatestVersion(status.latestVersion);
         const autoInstall =
           opts?.forceInstall ||
-          (await settingGet("autoInstallUpdates")) !== "false";
+          (await settingGet("autoInstallUpdates")) === "true";
 
         if (autoInstall) {
           await installNow(status.native);
@@ -111,11 +111,12 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
   }, [runCheck]);
 
   useEffect(() => {
-    void runCheck();
+    const bootTimer = window.setTimeout(() => void runCheck(), 3000);
     const timer = window.setInterval(() => void runCheck(), CHECK_INTERVAL_MS);
     const onFocus = () => void runCheck();
     window.addEventListener("focus", onFocus);
     return () => {
+      window.clearTimeout(bootTimer);
       window.clearInterval(timer);
       window.removeEventListener("focus", onFocus);
     };

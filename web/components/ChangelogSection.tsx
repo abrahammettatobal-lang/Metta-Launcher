@@ -11,6 +11,16 @@ interface ChangeGroup {
 
 const CHANGELOG: ChangeGroup[] = [
   {
+    version: "0.7.1",
+    date: "Junio 2026",
+    highlights: [
+      "Fix definitivo pantalla negra en macOS: sin crossorigin en assets (WebKit).",
+      "Java en macOS: detección en /Library/Java, Homebrew y extracción .tar.gz de Temurin.",
+      "Arquitectura real (Intel vs Apple Silicon) desde el sistema, no el navegador.",
+      "Fuentes del sistema, pantalla de carga visible e inspector WebKit en Ajustes.",
+    ],
+  },
+  {
     version: "0.7.0",
     date: "Junio 2026",
     highlights: [

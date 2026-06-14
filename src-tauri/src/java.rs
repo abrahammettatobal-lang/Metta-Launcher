@@ -1,6 +1,8 @@
 use serde::Serialize;
 use std::io;
 use std::path::{Path, PathBuf};
+#[cfg(target_os = "macos")]
+use std::process::Command;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -16,6 +18,10 @@ pub fn detect_java_candidates() -> Vec<JavaCandidate> {
     if let Ok(entries) = winreg_scan() {
       out.extend(entries);
     }
+  }
+  #[cfg(target_os = "macos")]
+  {
+    macos_java_scan(&mut out);
   }
   if let Ok(path_var) = std::env::var("PATH") {
     for dir in std::env::split_paths(&path_var) {
@@ -142,6 +148,44 @@ fn read_java_version(java_exe: &Path) -> Result<String, String> {
     Ok("desconocida".into())
   } else {
     Ok(first)
+  }
+}
+
+#[cfg(target_os = "macos")]
+fn macos_java_scan(out: &mut Vec<JavaCandidate>) {
+  let jvm_root = Path::new("/Library/Java/JavaVirtualMachines");
+  if jvm_root.is_dir() {
+    if let Ok(entries) = std::fs::read_dir(jvm_root) {
+      for entry in entries.flatten() {
+        let java = entry.path().join("Contents/Home/bin/java");
+        push_unique(out, java);
+      }
+    }
+  }
+
+  if let Ok(output) = Command::new("/usr/libexec/java_home").arg("-V").output() {
+    let text = String::from_utf8_lossy(&output.stderr);
+    for line in text.lines() {
+      if let Some(path) = line.rsplit('"').nth(1) {
+        let java = PathBuf::from(path).join("bin/java");
+        push_unique(out, java);
+      }
+    }
+  }
+
+  for prefix in ["/opt/homebrew/opt", "/usr/local/opt"] {
+    let root = Path::new(prefix);
+    if !root.is_dir() {
+      continue;
+    }
+    if let Ok(entries) = std::fs::read_dir(root) {
+      for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().to_lowercase();
+        if name.contains("openjdk") || name.contains("temurin") || name.starts_with("java") {
+          push_unique(out, entry.path().join("bin/java"));
+        }
+      }
+    }
   }
 }
 

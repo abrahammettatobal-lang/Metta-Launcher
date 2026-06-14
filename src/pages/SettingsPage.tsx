@@ -5,9 +5,16 @@ import {
   javaDetect,
   launcherSetRoot,
   logAppend,
+  openDevtools,
   settingGet,
   settingSet,
 } from "../services/bridge";
+import {
+  getHostPlatform,
+  hostArchLabel,
+  hostOsLabel,
+  type HostPlatformInfo,
+} from "../services/platform";
 import {
   checkAppUpdate,
   type AppUpdateStatus,
@@ -31,8 +38,10 @@ import { SponsorBadge } from "../components/sponsors/SponsorBadge";
 
 export function SettingsPage() {
   const [version, setVersion] = useState("…");
+  const [host, setHost] = useState<HostPlatformInfo | null>(null);
   useEffect(() => {
     void getVersion().then(setVersion).catch(() => setVersion("?"));
+    void getHostPlatform().then(setHost).catch(() => setHost(null));
   }, []);
   const [root, setRoot] = useState("");
   const [defaultRoot, setDefaultRoot] = useState("");
@@ -44,7 +53,7 @@ export function SettingsPage() {
   const [closeOnLaunch, setCloseOnLaunch] = useState(false);
   const [verboseGameLogs, setVerboseGameLogs] = useState(true);
   const [autoCheckUpdates, setAutoCheckUpdates] = useState(true);
-  const [autoInstallUpdates, setAutoInstallUpdates] = useState(true);
+  const [autoInstallUpdates, setAutoInstallUpdates] = useState(false);
   const [msClientId, setMsClientId] = useState("");
   const [detected, setDetected] = useState<
     Array<{ path: string; version: string | null }>
@@ -76,7 +85,7 @@ export function SettingsPage() {
       );
       setAutoCheckUpdates((await settingGet("autoCheckUpdates")) !== "false");
       setAutoInstallUpdates(
-        (await settingGet("autoInstallUpdates")) !== "false",
+        (await settingGet("autoInstallUpdates")) === "true",
       );
       setMsClientId((await settingGet("microsoftClientId")) || "");
     })();
@@ -306,8 +315,26 @@ export function SettingsPage() {
             </p>
             <div className="mt-4 grid grid-cols-2 gap-3">
               <Info label="Versión" value={version} />
-              <Info label="Plataforma" value={platformLabel()} />
+              <Info
+                label="Plataforma"
+                value={
+                  host
+                    ? `${hostOsLabel(host.os)} · ${hostArchLabel(host.arch)}`
+                    : "…"
+                }
+              />
             </div>
+            {host?.os === "macos" && (
+              <div className="mt-3">
+                <button
+                  type="button"
+                  className="btn text-[12px]"
+                  onClick={() => tap("Abrir inspector", () => openDevtools())}
+                >
+                  Abrir inspector WebKit (macOS)
+                </button>
+              </div>
+            )}
             <div className="mt-4 flex flex-wrap items-center gap-2">
               <button
                 type="button"
@@ -473,12 +500,4 @@ function Row({ label, value }: { label: string; value: string }) {
       </span>
     </div>
   );
-}
-
-function platformLabel(): string {
-  const ua = navigator.userAgent.toLowerCase();
-  if (ua.includes("windows")) return "Windows";
-  if (ua.includes("mac")) return "macOS";
-  if (ua.includes("linux")) return "Linux";
-  return "Desconocido";
 }

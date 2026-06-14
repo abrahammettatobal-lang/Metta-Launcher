@@ -148,6 +148,13 @@ async function runLaunchPipeline(instanceId: string): Promise<void> {
   const accounts = await accountsList();
   const active = accounts.find((a) => a.isActive);
   if (!active) throw new Error("No active account");
+  if (active.kind === "offline") {
+    await log(
+      "warn",
+      "Cuenta offline activa: servidores online (Hypixel, etc.) requieren inicio de sesión con Microsoft.",
+      instanceId,
+    );
+  }
 
   const os = detectMcOs();
   const nativesRel = `${inst.instancePath}/natives`.replace(/\\/g, "/");
