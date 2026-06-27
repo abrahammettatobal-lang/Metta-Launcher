@@ -11,6 +11,15 @@ interface ChangeGroup {
 
 const CHANGELOG: ChangeGroup[] = [
   {
+    version: "0.7.2",
+    date: "Junio 2026",
+    highlights: [
+      "Fix imágenes rotas y pantalla negra en macOS: CSP automático de Tauri + assets inline.",
+      "Modo offline: librerías, client.jar y manifiesto se guardan en disco y no se vuelven a descargar.",
+      "Fabric y version JSON en caché; descargas omitidas si el archivo ya existe con SHA1 válido.",
+    ],
+  },
+  {
     version: "0.7.1",
     date: "Junio 2026",
     highlights: [

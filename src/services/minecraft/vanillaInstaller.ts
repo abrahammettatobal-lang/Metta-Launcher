@@ -16,22 +16,46 @@ import { extractNativesForVersion } from "./nativesService";
 import type { McOs } from "./os";
 import { fetchVersionJsonUrl, fetchVersionManifest } from "./versionManifestService";
 
+function versionJsonRel(minecraftVersion: string): string {
+  return `shared/versions/${minecraftVersion}/${minecraftVersion}.json`;
+}
+
+export async function loadMergedVersionJson(
+  minecraftVersion: string,
+): Promise<McVersionJson | null> {
+  const vRel = versionJsonRel(minecraftVersion);
+  if (!(await pathExists(vRel))) return null;
+  try {
+    const raw = JSON.parse(await readTextFile(vRel)) as McVersionJson;
+    return mergeInheritedVersionJson(raw);
+  } catch {
+    return null;
+  }
+}
+
 export async function installVanillaSide(
   minecraftVersion: string,
   os: McOs,
   nativesRel: string,
   onStep?: (msg: string, done?: number, total?: number) => void,
 ): Promise<McVersionJson> {
-  onStep?.("Fetching manifest…");
-  const man = await fetchVersionManifest();
-  const vUrl = await fetchVersionJsonUrl(man, minecraftVersion);
-  onStep?.("Downloading version JSON…");
-  const vRel = `shared/versions/${minecraftVersion}/${minecraftVersion}.json`;
+  const vRel = versionJsonRel(minecraftVersion);
   await mkdirAllCmd(`shared/versions/${minecraftVersion}`);
-  await downloadFileCmd(`version-json-${minecraftVersion}`, vUrl, vRel, undefined);
-  const raw = JSON.parse(await readTextFile(vRel)) as McVersionJson;
-  const merged = await mergeInheritedVersionJson(raw);
-  await writeTextFile(vRel, JSON.stringify(merged, null, 2));
+
+  let merged = await loadMergedVersionJson(minecraftVersion);
+
+  if (!merged) {
+    onStep?.("Fetching manifest…");
+    const man = await fetchVersionManifest();
+    const vUrl = await fetchVersionJsonUrl(man, minecraftVersion);
+    onStep?.("Downloading version JSON…");
+    await downloadFileCmd(`version-json-${minecraftVersion}`, vUrl, vRel, undefined);
+    const raw = JSON.parse(await readTextFile(vRel)) as McVersionJson;
+    merged = await mergeInheritedVersionJson(raw);
+    await writeTextFile(vRel, JSON.stringify(merged, null, 2));
+  } else {
+    onStep?.("Using cached version JSON…");
+  }
 
   const client = merged.downloads?.client;
   if (!client?.url) throw new Error("Version JSON missing client.jar");
@@ -39,9 +63,10 @@ export async function installVanillaSide(
   if (!(await pathExists(jarRel))) {
     onStep?.("Downloading client.jar…");
     await downloadFileCmd(`client-${minecraftVersion}`, client.url, jarRel, client.sha1);
+  } else {
+    onStep?.("Using cached client.jar…");
   }
 
-  onStep?.("Downloading libraries…");
   await ensureLibrariesDownloaded(merged, os, onStep);
 
   onStep?.("Extracting natives…");
@@ -83,7 +108,10 @@ export async function ensureLibrariesDownloaded(
   }
   const missingLibs = new Set(await missingPathsCmd(libDownloads.map((l) => l.rel)));
   const pending = libDownloads.filter((l) => missingLibs.has(l.rel));
-  if (pending.length === 0) return;
+  if (pending.length === 0) {
+    onStep?.("Libraries already cached");
+    return;
+  }
 
   onStep?.("Downloading libraries…", 0, pending.length);
   let done = 0;

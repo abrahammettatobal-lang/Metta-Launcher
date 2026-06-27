@@ -27,6 +27,18 @@ pub async fn download_to_path(
   dest: &Path,
   expected_sha1_hex: Option<&str>,
 ) -> Result<(), String> {
+  if dest.is_file() {
+    if let Some(expected) = expected_sha1_hex {
+      if let Ok(actual) = sha1_file_hex(dest) {
+        if actual.eq_ignore_ascii_case(expected) {
+          return Ok(());
+        }
+      }
+    } else if dest.metadata().map(|m| m.len() > 0).unwrap_or(false) {
+      return Ok(());
+    }
+  }
+
   let parent = dest
     .parent()
     .ok_or_else(|| "Destino inválido.".to_string())?;
