@@ -10,6 +10,7 @@ import {
   IconHome,
   IconPlus,
   IconPuzzle,
+  IconRecord,
   IconSliders,
   IconTerminal,
   IconUser,
@@ -20,7 +21,6 @@ import { isWindowsClient } from "../services/bedrock";
 import { accountsList, type AccountRow } from "../services/bridge";
 import { Avatar } from "./Avatar";
 import { getVersion } from "@tauri-apps/api/app";
-import { SponsorBadge } from "../components/sponsors/SponsorBadge";
 
 interface NavItem {
   to: string;
@@ -61,6 +61,7 @@ function buildGroups(): NavGroup[] {
     {
       label: "Sistema",
       items: [
+        { to: "/recording", label: "Grabación", icon: <IconRecord /> },
         { to: "/history", label: "Historial", icon: <IconClock /> },
         { to: "/logs", label: "Registros", icon: <IconTerminal /> },
         { to: "/diagnostics", label: "Diagnóstico", icon: <IconActivity /> },
@@ -165,7 +166,6 @@ export function Sidebar({ status }: SidebarProps) {
               Iniciar sesión
             </NavLink>
           )}
-          <SponsorBadge compact />
           <StatusBlock status={status} />
         </div>
       </div>

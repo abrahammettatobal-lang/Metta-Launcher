@@ -40,6 +40,7 @@ import {
   resetAbortFlag,
   abortLaunch,
 } from "./launchProgress";
+import { recorderGetSettings, recorderStart } from "./recorder/recorderService";
 
 export { listForgeVersions } from "./minecraft/forgeInstaller";
 export { listNeoForgeVersions } from "./minecraft/neoforgeInstaller";
@@ -248,6 +249,10 @@ async function runLaunchPipeline(instanceId: string): Promise<void> {
     progressLoader(`Forge: instalando loader ${inst.loaderVersion}…`);
     merged = await installForgeSide(javaPath, root, inst.minecraftVersion, inst.loaderVersion);
     merged = await mergeInheritedVersionJson(merged);
+    await ensureLibrariesDownloaded(merged, os, async (m, done, total) => {
+      progressLibraries(m, done, total);
+      await log("info", m, instanceId);
+    });
     profiler.end("Loader");
   } else if (inst.loaderType === "neoforge") {
     profiler.start("Librerías");
@@ -258,7 +263,10 @@ async function runLaunchPipeline(instanceId: string): Promise<void> {
     progressLoader(`NeoForge: instalando loader ${inst.loaderVersion}…`);
     merged = await installNeoForgeSide(javaPath, root, inst.loaderVersion);
     merged = await mergeInheritedVersionJson(merged);
-    profiler.end("Loader");
+    await ensureLibrariesDownloaded(merged, os, async (m, done, total) => {
+      progressLibraries(m, done, total);
+      await log("info", m, instanceId);
+    });
   } else {
     throw new Error("Unknown loader");
   }
@@ -345,6 +353,16 @@ async function runLaunchPipeline(instanceId: string): Promise<void> {
   });
   profiler.end("Proceso Java");
   progressRunning();
+  try {
+    const rec = await recorderGetSettings();
+    if (rec.autoRecordOnLaunch) {
+      window.setTimeout(() => {
+        void recorderStart(rec).catch(() => undefined);
+      }, 8000);
+    }
+  } catch {
+    /* grabación opcional */
+  }
 
   // Persist launch cache for future fast-path validation
   try {

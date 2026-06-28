@@ -38,4 +38,11 @@ dunce = "1"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 
 [target.'cfg(windows)'.dependencies]
+wasapi = "0.23"
 winreg = "0.52"
+windows = { version = "0.58", features = [
+  "Win32_Foundation",
+  "Win32_UI_WindowsAndMessaging",
+  "Win32_Graphics_Gdi",
+  "Win32_Storage_FileSystem",
+] }

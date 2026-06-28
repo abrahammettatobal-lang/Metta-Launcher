@@ -125,7 +125,19 @@ async fn download_once(
     .await
     .map_err(|e| format!("Red: {e}"))?;
   if !res.status().is_success() {
-    return Err(format!("HTTP {} en {url}", res.status()));
+    let status = res.status();
+    let msg = match status.as_u16() {
+      404 => format!(
+        "Error 404: el archivo de FFmpeg no está disponible en el servidor.\n{url}"
+      ),
+      403 => format!("Error 403: acceso denegado al descargar FFmpeg.\n{url}"),
+      500..=599 => format!(
+        "Error {}: el servidor de descarga no responde correctamente.\n{url}",
+        status.as_u16()
+      ),
+      _ => format!("Error HTTP {} al descargar FFmpeg.\n{url}", status.as_u16()),
+    };
+    return Err(msg);
   }
   let total = res.content_length();
   let mut stream = res.bytes_stream();

@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import { Navigate, Outlet, Route, Routes } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { Sidebar, type SidebarStatus } from "./ui/Sidebar";
@@ -14,11 +15,20 @@ import { EditInstancePage } from "./pages/EditInstancePage";
 import { HistoryPage } from "./pages/HistoryPage";
 import { OnboardingGate } from "./pages/OnboardingGate";
 import { PageTransition } from "./ui/PageTransition";
+import { Card } from "./ui/Card";
 import {
   subscribeLaunchProgress,
   type LaunchProgress,
 } from "./services/launchProgress";
 import { subscribeGameExit } from "./services/downloads/downloadEvents";
+import {
+  recorderGetStatus,
+  recorderStop,
+} from "./services/recorder/recorderService";
+
+const RecordingPage = lazy(() =>
+  import("./pages/RecordingPage").then((m) => ({ default: m.RecordingPage })),
+);
 
 function Shell() {
   const [progress, setProgress] = useState<LaunchProgress | null>(null);
@@ -30,11 +40,18 @@ function Shell() {
     return () => u();
   }, []);
 
-  // Restore the launcher window when the game exits (if we minimized it on launch).
   useEffect(() => {
     let off: (() => void) | undefined;
     void subscribeGameExit(async () => {
       try {
+        const status = await recorderGetStatus();
+        if (
+          status.phase === "recording" ||
+          status.phase === "paused" ||
+          status.phase === "countdown"
+        ) {
+          await recorderStop();
+        }
         const win = (await import("@tauri-apps/api/window")).getCurrentWindow();
         await win.unminimize();
         await win.setFocus();
@@ -92,6 +109,20 @@ export function App() {
         <Route path="settings" element={<SettingsPage />} />
         <Route path="diagnostics" element={<DiagnosticsPage />} />
         <Route path="history" element={<HistoryPage />} />
+        <Route
+          path="recording"
+          element={
+            <Suspense
+              fallback={
+                <Card padding="tight">
+                  <p className="text-[13px] text-ink-muted">Cargando grabador…</p>
+                </Card>
+              }
+            >
+              <RecordingPage />
+            </Suspense>
+          }
+        />
         <Route path="instances/:id/edit" element={<EditInstancePage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

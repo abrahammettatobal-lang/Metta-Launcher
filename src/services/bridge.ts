@@ -252,6 +252,14 @@ export async function runJavaJar(payload: {
   return invoke("run_java_jar", { req: payload });
 }
 
+export async function forgeListVersions(mcVersion: string): Promise<string[]> {
+  return invoke("forge_list_versions", { mcVersion });
+}
+
+export async function neoforgeListVersions(mcVersion?: string): Promise<string[]> {
+  return invoke("neoforge_list_versions", { mcVersion: mcVersion ?? null });
+}
+
 export async function spawnJavaGame(payload: {
   javaPath: string;
   cwd: string;

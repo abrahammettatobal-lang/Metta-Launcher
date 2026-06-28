@@ -7,14 +7,27 @@ mod download;
 mod game;
 mod instances;
 mod java;
+mod loaders;
 mod paths;
+mod recorder;
 mod system;
 
+use loaders::{forge_list_versions, neoforge_list_versions};
+use recorder::{
+  recorder_delete_recording, recorder_detect_encoders, recorder_find_minecraft_window,
+  recorder_get_game_status, recorder_get_settings, recorder_get_status, recorder_ffmpeg_status,
+  recorder_install_ffmpeg, recorder_list_audio_devices,
+  recorder_list_monitors, recorder_list_recordings, recorder_pause, recorder_probe_hardware,
+  recorder_rename_recording, recorder_resume, recorder_save_settings, recorder_screenshot,
+  recorder_start, recorder_stop,
+};
 use chrono::Utc;
 use db::{AccountRow, Db, InstanceRow, LogRow};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use std::io::Read;
 use std::process::{Command, Stdio};
+use std::thread;
 use std::sync::Arc;
 use tauri::{AppHandle, Manager, State};
 use uuid::Uuid;
@@ -22,6 +35,7 @@ use uuid::Uuid;
 pub struct AppState {
   pub db: Arc<Db>,
   pub http: reqwest::Client,
+  pub recorder: Arc<recorder::RecorderManager>,
 }
 
 #[derive(Serialize)]
@@ -630,14 +644,44 @@ fn run_java_jar(state: State<'_, AppState>, req: RunJavaRequest) -> Result<Strin
     .current_dir(&cwd)
     .stdout(Stdio::piped())
     .stderr(Stdio::piped());
-  let out = cmd.output().map_err(|e| format!("Fallo al ejecutar instalador: {e}"))?;
-  let mut merged = String::new();
-  merged.push_str(&String::from_utf8_lossy(&out.stdout));
-  merged.push_str(&String::from_utf8_lossy(&out.stderr));
-  if !out.status.success() {
+
+  let mut child = cmd
+    .spawn()
+    .map_err(|e| format!("Fallo al ejecutar instalador: {e}"))?;
+
+  let stdout = child.stdout.take();
+  let stderr = child.stderr.take();
+
+  let out_handle = thread::spawn(move || {
+    stdout
+      .map(|mut s| {
+        let mut buf = Vec::new();
+        let _ = s.read_to_end(&mut buf);
+        String::from_utf8_lossy(&buf).to_string()
+      })
+      .unwrap_or_default()
+  });
+  let err_handle = thread::spawn(move || {
+    stderr
+      .map(|mut s| {
+        let mut buf = Vec::new();
+        let _ = s.read_to_end(&mut buf);
+        String::from_utf8_lossy(&buf).to_string()
+      })
+      .unwrap_or_default()
+  });
+
+  let status = child
+    .wait()
+    .map_err(|e| format!("Fallo esperando instalador: {e}"))?;
+  let stdout = out_handle.join().unwrap_or_default();
+  let stderr = err_handle.join().unwrap_or_default();
+  let merged = format!("{stdout}{stderr}");
+
+  if !status.success() {
     return Err(format!(
       "El instalador terminó con error ({}): {}",
-      out.status,
+      status,
       merged.trim()
     ));
   }
@@ -716,7 +760,11 @@ pub fn run() {
         .user_agent("MettaLauncher/0.4 (+https://metta-launcher.vercel.app)")
         .build()
         .expect("http client");
-      app.manage(AppState { db, http });
+      app.manage(AppState {
+        db: db.clone(),
+        http,
+        recorder: Arc::new(recorder::RecorderManager::new()),
+      });
 
       #[cfg(debug_assertions)]
       if let Some(w) = app.get_webview_window("main") {
@@ -763,6 +811,8 @@ pub fn run() {
       host_platform,
       open_devtools,
       run_java_jar,
+      forge_list_versions,
+      neoforge_list_versions,
       spawn_java_game,
       stop_java_game,
       java_detect,
@@ -787,6 +837,25 @@ pub fn run() {
       backups_list,
       instance_restore_backup,
       instance_import_zip,
+      recorder_get_settings,
+      recorder_save_settings,
+  recorder_get_status,
+  recorder_ffmpeg_status,
+  recorder_install_ffmpeg,
+  recorder_probe_hardware,
+      recorder_detect_encoders,
+      recorder_list_audio_devices,
+      recorder_list_monitors,
+      recorder_find_minecraft_window,
+      recorder_get_game_status,
+      recorder_start,
+      recorder_stop,
+      recorder_pause,
+      recorder_resume,
+      recorder_screenshot,
+      recorder_list_recordings,
+      recorder_delete_recording,
+      recorder_rename_recording,
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");

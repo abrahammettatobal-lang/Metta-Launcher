@@ -72,6 +72,11 @@ pub fn stop_game_process() -> Result<(), String> {
   Ok(())
 }
 
+pub fn running_pid() -> Option<u32> {
+  let pid = RUNNING_PID.load(Ordering::SeqCst);
+  if pid == 0 { None } else { Some(pid) }
+}
+
 fn push_log_tail(tail: &Arc<Mutex<Vec<String>>>, line: String) {
   if let Ok(mut buf) = tail.lock() {
     buf.push(line);

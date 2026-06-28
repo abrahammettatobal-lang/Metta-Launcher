@@ -42,15 +42,6 @@ export default defineConfig(() => ({
       polyfill: false,
     },
     cssTarget: process.env.TAURI_ENV_PLATFORM === "windows" ? "chrome105" : "safari14",
-    /** Inline bundled PNGs (logo, sponsor) so WebKit/Tauri always resolves them. */
-    assetsInlineLimit: 102400,
-  },
-  experimental: {
-    renderBuiltUrl(_filename, { type }) {
-      if (type === "asset") {
-        return { relative: true };
-      }
-    },
   },
   server: {
     port: 1420,

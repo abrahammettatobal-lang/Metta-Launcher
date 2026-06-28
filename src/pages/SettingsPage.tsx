@@ -34,7 +34,6 @@ import {
 import { tap } from "../utils/tap";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { getVersion } from "@tauri-apps/api/app";
-import { SponsorBadge } from "../components/sponsors/SponsorBadge";
 
 export function SettingsPage() {
   const [version, setVersion] = useState("…");
@@ -421,7 +420,6 @@ export function SettingsPage() {
               <Row label="Datos" value={root} />
               <Row label="Base SQLite" value={dbPath} />
             </div>
-            <SponsorBadge className="mt-4" />
           </Card>
         </div>
       </div>

@@ -1,5 +1,6 @@
 import {
   downloadFileCmd,
+  forgeListVersions as forgeListVersionsCmd,
   listDirCmd,
   mkdirAllCmd,
   pathExists,
@@ -24,20 +25,49 @@ async function ensureLauncherProfilesStub(): Promise<void> {
   await writeTextFile(rel, JSON.stringify(stub, null, 2));
 }
 
-export async function listForgeVersions(mc: string): Promise<string[]> {
-  const res = await fetch(
-    "https://maven.minecraftforge.net/net/minecraftforge/forge/maven-metadata.xml",
-  );
-  if (!res.ok) throw new Error(`Forge metadata HTTP ${res.status}`);
-  const xml = await res.text();
-  const out: string[] = [];
-  const re = /<version>([^<]+)<\/version>/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(xml))) {
-    if (m[1].startsWith(`${mc}-`)) out.push(m[1]);
+function forgeVersionFolderCandidates(forgeKey: string): string[] {
+  const parts = forgeKey.split("-");
+  const mc = parts[0];
+  const forgeVer = parts.slice(1).join("-");
+  const out = [forgeKey];
+  if (forgeVer) {
+    out.push(`${mc}-forge-${forgeVer}`);
   }
-  out.sort();
   return out;
+}
+
+async function readVersionJsonFromCandidates(
+  candidates: string[],
+): Promise<McVersionJson> {
+  const verDir = "versions";
+  const vers = await listDirCmd(verDir);
+  const dirs = vers.filter((e) => e.isDir).map((e) => e.name);
+
+  for (const candidate of candidates) {
+    if (!dirs.includes(candidate)) continue;
+    const jsonPath = `${verDir}/${candidate}/${candidate}.json`;
+    if (!(await pathExists(jsonPath))) continue;
+    const txt = await readTextFile(jsonPath);
+    return JSON.parse(txt) as McVersionJson;
+  }
+
+  for (const dir of dirs) {
+    for (const candidate of candidates) {
+      if (!dir.includes(candidate) && !candidate.includes(dir)) continue;
+      const jsonPath = `${verDir}/${dir}/${dir}.json`;
+      if (!(await pathExists(jsonPath))) continue;
+      const txt = await readTextFile(jsonPath);
+      return JSON.parse(txt) as McVersionJson;
+    }
+  }
+
+  throw new Error(
+    `Forge installer did not create a known version folder (${candidates.join(", ")})`,
+  );
+}
+
+export async function listForgeVersions(mc: string): Promise<string[]> {
+  return forgeListVersionsCmd(mc);
 }
 
 export async function installForgeSide(
@@ -54,8 +84,6 @@ export async function installForgeSide(
   if (!(await pathExists(jarRel))) {
     await downloadFileCmd(`forge-installer-${slug}`, installerUrl, jarRel, undefined);
   }
-  // Forge's installer refuses to run if there is no launcher_profiles.json in
-  // the install target. Write a minimal stub before invoking the jar.
   await ensureLauncherProfilesStub();
   const root = launcherRoot.replace(/\\/g, "/");
   await runJavaJar({
@@ -64,11 +92,5 @@ export async function installForgeSide(
     workDir: workRel,
     args: ["--installClient", root],
   });
-  const verDir = `versions`;
-  const vers = await listDirCmd(verDir);
-  const dir = vers.find((e) => e.isDir);
-  if (!dir) throw new Error("Forge installer did not create versions/");
-  const jsonPath = `${verDir}/${dir.name}/${dir.name}.json`;
-  const txt = await readTextFile(jsonPath);
-  return JSON.parse(txt) as McVersionJson;
+  return readVersionJsonFromCandidates(forgeVersionFolderCandidates(forgeKey));
 }

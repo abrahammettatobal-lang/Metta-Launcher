@@ -145,6 +145,15 @@ export function IconClock(p: Props) {
   );
 }
 
+export function IconRecord(p: Props) {
+  return (
+    <svg {...base} {...p}>
+      <circle cx="12" cy="12" r="9" />
+      <circle cx="12" cy="12" r="3.5" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
 export function IconDot(p: Props) {
   return (
     <svg {...base} {...p} fill="currentColor" stroke="none">
@@ -248,7 +257,8 @@ export function IconLink(p: Props) {
   );
 }
 
-import mettaLogoSrc from "../assets/metta-logo.png";
+/** Logo served from /public — stable relative path in Tauri production builds. */
+const METTA_LOGO_SRC = "./metta-logo.png";
 
 /** Official Metta Launcher logomark — sourced from the project artwork. */
 export function MettaMark({
@@ -260,7 +270,7 @@ export function MettaMark({
 }) {
   return (
     <img
-      src={mettaLogoSrc}
+      src={METTA_LOGO_SRC}
       width={size}
       height={size}
       alt="Metta Launcher"
