@@ -305,6 +305,15 @@ pub fn create_instance_backup(db: &Db, instance_path: &str, name: &str) -> Resul
       std::io::Write::write_all(&mut zip, &data).map_err(|e| e.to_string())?;
     }
   }
+  for extra in backup_extra_dirs(&src) {
+    if ["mods", "config", "saves", "resourcepacks", "shaderpacks"].contains(&extra.as_str()) {
+      continue;
+    }
+    let p = src.join(&extra);
+    if p.is_dir() {
+      add_dir_to_zip(&mut zip, &p, &format!("{extra}/"), options)?;
+    }
+  }
   zip.finish().map_err(|e| e.to_string())?;
   let size = zip_path.metadata().map(|m| m.len()).unwrap_or(0);
   Ok(BackupInfo {
@@ -434,12 +443,29 @@ pub fn launch_history_list(db: &Db, limit: i64) -> Result<Vec<LaunchHistoryRow>,
 }
 
 pub fn recommended_java_major(mc_version: &str) -> u8 {
-  let parts: Vec<u32> = mc_version
+  let trimmed = mc_version.trim();
+  if trimmed.starts_with("rd-") {
+    return 8;
+  }
+  if trimmed.starts_with('a') || trimmed.contains("alpha") {
+    return 8;
+  }
+  if trimmed.starts_with('b') && !trimmed.starts_with("build") {
+    return 8;
+  }
+
+  let parts: Vec<u32> = trimmed
     .split('.')
-    .filter_map(|p| p.parse().ok())
+    .filter_map(|p| {
+      p.chars()
+        .take_while(|c| c.is_ascii_digit())
+        .collect::<String>()
+        .parse()
+        .ok()
+    })
     .collect();
   if parts.is_empty() {
-    return 21;
+    return 8;
   }
   // Minecraft 26+ (class file 69) requires Java 25.
   if parts[0] >= 26 {
@@ -604,13 +630,484 @@ pub fn restore_instance_backup(db: &Db, zip_path: &str, instance_path: &str) -> 
   extract_zip_file(&zip_p, &dest)
 }
 
+fn backup_extra_dirs(instance_root: &Path) -> Vec<String> {
+  const KNOWN: &[&str] = &[
+    "defaultconfigs",
+    "kubejs",
+    "scripts",
+    "datapacks",
+    "ftbquests",
+    "patchouli_books",
+    "global_data_packs",
+    "global_packs",
+    "blueprints",
+    "schematics",
+    "journeymap",
+    "local",
+    "modernfix",
+    "serverconfig",
+    "essential",
+    "fancymenu_data",
+    "patchouli",
+    "emotes",
+  ];
+  let mut out: Vec<String> = KNOWN.iter().map(|s| (*s).to_string()).collect();
+  if let Ok(entries) = std::fs::read_dir(instance_root) {
+    for entry in entries.flatten() {
+      let name = entry.file_name().to_string_lossy().to_string();
+      if name.starts_with('.') {
+        continue;
+      }
+      if entry.path().is_dir() && !out.iter().any(|x| x == &name) {
+        out.push(name);
+      }
+    }
+  }
+  out
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModpackDetectResult {
+  pub pack_root: String,
+  pub manifest_path: Option<String>,
+  pub kind: String,
+  pub minecraft_version: Option<String>,
+  pub loader_type: Option<String>,
+  pub loader_version: Option<String>,
+  pub mod_count: u32,
+  pub suggested_name: Option<String>,
+}
+
+fn looks_like_mc_version(name: &str) -> bool {
+  let parts: Vec<&str> = name.split('.').collect();
+  if parts.len() < 2 || parts.len() > 3 {
+    return false;
+  }
+  parts.iter().all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()))
+}
+
+fn count_mod_jars(mods_dir: &Path) -> u32 {
+  if !mods_dir.is_dir() {
+    return 0;
+  }
+  let mut count = 0u32;
+  let Ok(entries) = std::fs::read_dir(mods_dir) else {
+    return 0;
+  };
+  for entry in entries.flatten() {
+    let path = entry.path();
+    if path.is_file() && path.extension().and_then(|e| e.to_str()) == Some("jar") {
+      count += 1;
+    } else if path.is_dir() {
+      count += count_mod_jars(&path);
+    }
+  }
+  count
+}
+
+fn infer_loader_from_mods_dir(mods_dir: &Path) -> Option<String> {
+  if !mods_dir.is_dir() {
+    return None;
+  }
+  let Ok(entries) = std::fs::read_dir(mods_dir) else {
+    return None;
+  };
+  for entry in entries.flatten() {
+    let path = entry.path();
+    if path.is_file() && path.extension().and_then(|e| e.to_str()) == Some("jar") {
+      let meta = parse_mod_jar(&path);
+      if let Some(loader) = meta.loader {
+        return Some(loader);
+      }
+    } else if path.is_dir() {
+      if let Some(loader) = infer_loader_from_mods_dir(&path) {
+        return Some(loader);
+      }
+    }
+  }
+  None
+}
+
+fn infer_mc_from_mods_dir(mods_dir: &Path) -> Option<String> {
+  if !mods_dir.is_dir() {
+    return None;
+  }
+  let Ok(entries) = std::fs::read_dir(mods_dir) else {
+    return None;
+  };
+  for entry in entries.flatten() {
+    let name = entry.file_name().to_string_lossy().to_string();
+    if entry.path().is_dir() && looks_like_mc_version(&name) {
+      return Some(name);
+    }
+  }
+  None
+}
+
+fn detect_bundled_meta(pack_root: &Path) -> ModpackDetectResult {
+  let mut minecraft_version = None;
+  let mut loader_type = None;
+  let mut loader_version = None;
+
+  if let Ok(entries) = std::fs::read_dir(pack_root) {
+    for entry in entries.flatten() {
+      let name = entry.file_name().to_string_lossy().to_string();
+      let lower = name.to_lowercase();
+      if lower.starts_with("minecraft_server.") && lower.ends_with(".jar") {
+        let ver = name
+          .strip_prefix("minecraft_server.")
+          .and_then(|s| s.strip_suffix(".jar"));
+        minecraft_version = ver.map(String::from);
+        if loader_type.is_none() {
+          loader_type = Some("forge".into());
+        }
+      }
+      if lower.starts_with("fabric-loader") && lower.ends_with(".jar") {
+        loader_type = Some("fabric".into());
+        if let Some(rest) = lower.strip_prefix("fabric-loader-") {
+          loader_version = rest.strip_suffix(".jar").map(String::from);
+        }
+      }
+      if lower.starts_with("neoforge-") && lower.ends_with("-installer.jar") {
+        loader_type = Some("neoforge".into());
+      }
+    }
+  }
+
+  let mods_dir = pack_root.join("mods");
+  let mod_count = count_mod_jars(&mods_dir);
+
+  if pack_root.join("config").join("forge.cfg").is_file() {
+    loader_type.get_or_insert_with(|| "forge".into());
+  }
+
+  if loader_type.is_none() {
+    loader_type = infer_loader_from_mods_dir(&mods_dir);
+  }
+  if loader_type.is_none() && mod_count > 0 {
+    loader_type = Some("forge".into());
+  }
+
+  if minecraft_version.is_none() {
+    minecraft_version = infer_mc_from_mods_dir(&mods_dir);
+  }
+
+  let suggested_name = pack_root
+    .file_name()
+    .map(|s| s.to_string_lossy().into_owned());
+
+  ModpackDetectResult {
+    pack_root: pack_root.to_string_lossy().into_owned(),
+    manifest_path: None,
+    kind: "bundled".into(),
+    minecraft_version,
+    loader_type,
+    loader_version,
+    mod_count,
+    suggested_name,
+  }
+}
+
+fn curseforge_detect_result(pack_root: &Path, manifest_path: &Path) -> ModpackDetectResult {
+  ModpackDetectResult {
+    pack_root: pack_root.to_string_lossy().into_owned(),
+    manifest_path: Some(manifest_path.to_string_lossy().into_owned()),
+    kind: "curseforge".into(),
+    minecraft_version: None,
+    loader_type: None,
+    loader_version: None,
+    mod_count: 0,
+    suggested_name: None,
+  }
+}
+
+fn detect_zip_content_prefix(entries: &[String]) -> String {
+  let mut roots: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+  for entry in entries {
+    if entry.ends_with('/') {
+      continue;
+    }
+    if let Some((root, _)) = entry.split_once('/') {
+      if !root.is_empty() {
+        roots.insert(format!("{root}/"));
+      }
+    }
+  }
+  if roots.len() == 1 {
+    if let Some(root) = roots.iter().next() {
+      let has_nested_pack = entries.iter().any(|e| {
+        e.starts_with(root)
+          && (e.contains("/mods/") || e.ends_with("manifest.json"))
+      });
+      if has_nested_pack {
+        return root.clone();
+      }
+    }
+  }
+  String::new()
+}
+
+fn zip_entry_matches(entries: &[String], prefix: &str, suffix: &str) -> bool {
+  entries
+    .iter()
+    .any(|e| e == suffix || e == &format!("{prefix}{suffix}") || e.ends_with(suffix))
+}
+
+fn detect_bundled_from_zip_entries(entries: &[String], prefix: &str) -> ModpackDetectResult {
+  let mut minecraft_version = None;
+  let mut loader_type = None;
+  let mut loader_version = None;
+  let mut mod_count = 0u32;
+
+  for entry in entries {
+    if entry.contains("__MACOSX") {
+      continue;
+    }
+    let entry_lower = entry.to_lowercase();
+    let file_name = entry.rsplit('/').next().unwrap_or(entry);
+    let lower = file_name.to_lowercase();
+    if lower.starts_with("minecraft_server.") && lower.ends_with(".jar") {
+      minecraft_version = file_name
+        .strip_prefix("minecraft_server.")
+        .and_then(|s| s.strip_suffix(".jar"))
+        .map(String::from);
+      loader_type.get_or_insert_with(|| "forge".into());
+    }
+    if lower.starts_with("fabric-loader") && lower.ends_with(".jar") {
+      loader_type = Some("fabric".into());
+      if let Some(rest) = lower.strip_prefix("fabric-loader-") {
+        loader_version = rest.strip_suffix(".jar").map(String::from);
+      }
+    }
+    if (entry_lower.starts_with("mods/") || entry_lower.contains("/mods/"))
+      && entry_lower.ends_with(".jar")
+      && !entry_lower.contains("/meta-inf/")
+    {
+      mod_count += 1;
+    }
+    if entry_lower.ends_with("config/forge.cfg") || entry_lower == "config/forge.cfg" {
+      loader_type.get_or_insert_with(|| "forge".into());
+    }
+    if entry_lower.contains("/mods/") || entry_lower.starts_with("mods/") {
+      let mods_tail = entry_lower
+        .strip_prefix("mods/")
+        .or_else(|| entry_lower.split("/mods/").nth(1))
+        .unwrap_or("");
+      if let Some(sub) = mods_tail.split('/').next() {
+        if looks_like_mc_version(sub) {
+          minecraft_version.get_or_insert_with(|| sub.to_string());
+        }
+      }
+    }
+  }
+
+  if loader_type.is_none() && mod_count > 0 {
+    loader_type = Some("forge".into());
+  }
+
+  ModpackDetectResult {
+    pack_root: prefix.trim_end_matches('/').to_string(),
+    manifest_path: None,
+    kind: "bundled".into(),
+    minecraft_version,
+    loader_type,
+    loader_version,
+    mod_count,
+    suggested_name: None,
+  }
+}
+
+pub fn modpack_detect_root(path: &str) -> Result<ModpackDetectResult, String> {
+  let base = PathBuf::from(path);
+  if !base.is_dir() {
+    return Err("La ruta no es una carpeta válida.".into());
+  }
+
+  let direct = base.join("manifest.json");
+  if direct.is_file() {
+    return Ok(curseforge_detect_result(&base, &direct));
+  }
+
+  if base.join("mods").is_dir() && count_mod_jars(&base.join("mods")) > 0 {
+    return Ok(detect_bundled_meta(&base));
+  }
+
+  let entries = std::fs::read_dir(&base).map_err(|e| e.to_string())?;
+  for entry in entries.flatten() {
+    let child = entry.path();
+    if !child.is_dir() {
+      continue;
+    }
+    let manifest = child.join("manifest.json");
+    if manifest.is_file() {
+      return Ok(curseforge_detect_result(&child, &manifest));
+    }
+    if child.join("mods").is_dir() && count_mod_jars(&child.join("mods")) > 0 {
+      return Ok(detect_bundled_meta(&child));
+    }
+  }
+
+  Err(
+    "No se reconoció el modpack: falta manifest.json (CurseForge) o una carpeta mods/ con archivos .jar.".into(),
+  )
+}
+
+pub fn modpack_inspect_zip(zip_path: &str) -> Result<ModpackDetectResult, String> {
+  let zip_p = PathBuf::from(zip_path);
+  if !zip_p.is_file() {
+    return Err("El archivo ZIP no existe.".into());
+  }
+  let file = std::fs::File::open(&zip_p).map_err(|e| e.to_string())?;
+  let mut archive =
+    zip::ZipArchive::new(std::io::BufReader::new(file)).map_err(|e| e.to_string())?;
+  let mut entries: Vec<String> = Vec::with_capacity(archive.len());
+  for i in 0..archive.len() {
+    let f = archive.by_index(i).map_err(|e| e.to_string())?;
+    entries.push(f.name().to_string());
+  }
+
+  let prefix = detect_zip_content_prefix(&entries);
+  if zip_entry_matches(&entries, &prefix, "manifest.json") {
+    let pack_root = if prefix.is_empty() {
+      ".".into()
+    } else {
+      prefix.trim_end_matches('/').to_string()
+    };
+    return Ok(ModpackDetectResult {
+      pack_root,
+      manifest_path: Some(if prefix.is_empty() {
+        "manifest.json".into()
+      } else {
+        format!("{prefix}manifest.json")
+      }),
+      kind: "curseforge".into(),
+      minecraft_version: None,
+      loader_type: None,
+      loader_version: None,
+      mod_count: 0,
+      suggested_name: zip_p
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned()),
+    });
+  }
+
+  let has_mods = entries.iter().any(|e| {
+    !e.contains("__MACOSX")
+      && e.ends_with(".jar")
+      && (e.contains("/mods/") || e.starts_with("mods/"))
+  });
+  if !has_mods {
+    return Err(
+      "El ZIP no contiene manifest.json (CurseForge) ni mods/ con archivos .jar.".into(),
+    );
+  }
+
+  let mut result = detect_bundled_from_zip_entries(&entries, &prefix);
+  if result.suggested_name.is_none() {
+    result.suggested_name = zip_p
+      .file_stem()
+      .map(|s| s.to_string_lossy().into_owned());
+  }
+  Ok(result)
+}
+
+pub fn modpack_read_manifest(pack_root: &str) -> Result<String, String> {
+  let manifest = PathBuf::from(pack_root).join("manifest.json");
+  if !manifest.is_file() {
+    return Err("manifest.json no encontrado en la raíz del modpack.".into());
+  }
+  std::fs::read_to_string(&manifest).map_err(|e| e.to_string())
+}
+
+pub fn modpack_copy_overrides(pack_root: &str, instance_rel: &str, db: &Db) -> Result<(), String> {
+  let root = launcher_root(db);
+  let pack = PathBuf::from(pack_root);
+  let overrides = pack.join("overrides");
+  if !overrides.is_dir() {
+    return Ok(());
+  }
+  let dest = root.join(instance_rel);
+  std::fs::create_dir_all(&dest).map_err(|e| e.to_string())?;
+  copy_dir_merge(&overrides, &dest)
+}
+
+fn postprocess_bundled_instance(instance_root: &Path, launcher_data_root: &Path) -> Result<(), String> {
+  for sub in ["mods", "config", "saves", "resourcepacks", "shaderpacks"] {
+    let p = instance_root.join(sub);
+    if !p.exists() {
+      std::fs::create_dir_all(&p).map_err(|e| e.to_string())?;
+    }
+  }
+
+  let bundled_libraries = instance_root.join("libraries");
+  if bundled_libraries.is_dir() {
+    let shared_libraries = launcher_data_root.join("shared/libraries");
+    std::fs::create_dir_all(&shared_libraries).map_err(|e| e.to_string())?;
+    copy_dir_merge(&bundled_libraries, &shared_libraries)?;
+  }
+
+  let world = instance_root.join("world");
+  let saves = instance_root.join("saves");
+  if world.is_dir() {
+    std::fs::create_dir_all(&saves).map_err(|e| e.to_string())?;
+    let target = saves.join("World");
+    if !target.exists() {
+      copy_dir_merge(&world, &target)?;
+    }
+  }
+  Ok(())
+}
+
+pub fn modpack_count_mod_jars(instance_rel: &str, db: &Db) -> Result<u32, String> {
+  let root = launcher_root(db);
+  let mods_dir = root.join(instance_rel).join("mods");
+  Ok(count_mod_jars(&mods_dir))
+}
+
+pub fn modpack_postprocess_instance(instance_rel: &str, db: &Db) -> Result<(), String> {
+  let root = launcher_root(db);
+  let dest = root.join(instance_rel);
+  postprocess_bundled_instance(&dest, &root)
+}
+
+pub fn modpack_copy_tree(pack_root: &str, instance_rel: &str, db: &Db) -> Result<(), String> {
+  let root = launcher_root(db);
+  let pack = PathBuf::from(pack_root);
+  if !pack.is_dir() {
+    return Err("La carpeta del modpack no existe.".into());
+  }
+  let dest = root.join(instance_rel);
+  std::fs::create_dir_all(&dest).map_err(|e| e.to_string())?;
+  copy_dir_merge(&pack, &dest)?;
+  postprocess_bundled_instance(&dest, &root)
+}
+
+fn copy_dir_merge(src: &Path, dest: &Path) -> Result<(), String> {
+  for entry in std::fs::read_dir(src).map_err(|e| e.to_string())? {
+    let entry = entry.map_err(|e| e.to_string())?;
+    let from = entry.path();
+    let to = dest.join(entry.file_name());
+    if from.is_dir() {
+      std::fs::create_dir_all(&to).map_err(|e| e.to_string())?;
+      copy_dir_merge(&from, &to)?;
+    } else if from.is_file() {
+      if let Some(parent) = to.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+      }
+      std::fs::copy(&from, &to).map_err(|e| format!("No se pudo copiar {:?}: {e}", from))?;
+    }
+  }
+  Ok(())
+}
+
 pub fn import_instance_zip(db: &Db, zip_path: &str, folder_name: &str) -> Result<String, String> {
   let root = launcher_root(db);
   let zip_p = PathBuf::from(zip_path);
   if !zip_p.is_file() {
     return Err("El archivo ZIP no existe.".into());
   }
-  let safe = folder_name
+  let _safe = folder_name
     .chars()
     .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
     .collect::<String>();
@@ -619,12 +1116,7 @@ pub fn import_instance_zip(db: &Db, zip_path: &str, folder_name: &str) -> Result
   let dest = root.join(&rel);
   std::fs::create_dir_all(&dest).map_err(|e| e.to_string())?;
   extract_zip_file(&zip_p, &dest)?;
-  for sub in ["mods", "config", "saves", "resourcepacks", "shaderpacks"] {
-    let p = dest.join(sub);
-    if !p.exists() {
-      std::fs::create_dir_all(&p).map_err(|e| e.to_string())?;
-    }
-  }
+  postprocess_bundled_instance(&dest, &root)?;
   Ok(rel)
 }
 
@@ -649,4 +1141,22 @@ fn extract_zip_file(zip_path: &Path, out_dir: &Path) -> Result<(), String> {
     }
   }
   Ok(())
+}
+
+#[cfg(test)]
+mod modpack_probe_tests {
+  use super::*;
+
+  #[test]
+  fn blightfall_zip_is_bundled_forge_1710() {
+    let path = r"c:\Users\USER\Downloads\Blightfall_Server_3.1.1-CE.zip";
+    if !Path::new(path).is_file() {
+      return;
+    }
+    let result = modpack_inspect_zip(path).expect("inspect zip");
+    assert_eq!(result.kind, "bundled");
+    assert_eq!(result.minecraft_version.as_deref(), Some("1.7.10"));
+    assert_eq!(result.loader_type.as_deref(), Some("forge"));
+    assert!(result.mod_count > 50);
+  }
 }

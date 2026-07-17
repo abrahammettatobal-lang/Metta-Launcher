@@ -13,8 +13,17 @@ import {
   listNeoForgeVersions,
   prepareNewInstancePaths,
 } from "../services/launchInstance";
-import { fetchFabricLoaderVersions } from "../services/minecraft/fabricMeta";
-import { fetchVersionManifest } from "../services/minecraft/versionManifestService";
+import { fetchFabricLoaderVersionsForMc } from "../services/minecraft/fabricMeta";
+import {
+  defaultVersionId,
+  fetchVersionCatalog,
+  type VersionCatalog,
+} from "../services/minecraft/versionCatalogService";
+import { VersionSelector } from "../components/minecraft/VersionSelector";
+import {
+  ModpackImportProgressBar,
+  useModpackImport,
+} from "../components/modpack/ModpackImport";
 import { Topbar } from "../ui/Topbar";
 import { Card } from "../ui/Card";
 import { Field, FieldSelect } from "../ui/Field";
@@ -49,7 +58,9 @@ export function CreateInstancePage() {
   const nav = useNavigate();
   const [name, setName] = useState("Nueva instancia");
   const [mc, setMc] = useState("");
-  const [versions, setVersions] = useState<string[]>([]);
+  const [catalog, setCatalog] = useState<VersionCatalog | null>(null);
+  const [catalogLoading, setCatalogLoading] = useState(true);
+  const modpackImport = useModpackImport();
   const [loader, setLoader] = useState<LoaderType>("vanilla");
   const [lv, setLv] = useState("");
   const [forgeList, setForgeList] = useState<string[]>([]);
@@ -59,14 +70,14 @@ export function CreateInstancePage() {
   const [ramMax, setRamMax] = useState(4096);
 
   useEffect(() => {
-    void fetchVersionManifest().then((m) => {
-      const ids = m.versions.map((v) => v.id).slice(0, 80);
-      setVersions(ids);
-      if (!mc) {
-        setMc(m.latest.release || ids.find((id) => !id.includes("pre")) || ids[0] || "");
-      }
-    });
-  }, [mc]);
+    setCatalogLoading(true);
+    void fetchVersionCatalog()
+      .then((c) => {
+        setCatalog(c);
+        setMc((prev) => prev || defaultVersionId(c));
+      })
+      .finally(() => setCatalogLoading(false));
+  }, []);
 
   // Apply user defaults from Settings.
   useEffect(() => {
@@ -96,7 +107,7 @@ export function CreateInstancePage() {
           setNeoList([]);
         });
     if (loader === "fabric")
-      void fetchFabricLoaderVersions()
+      void fetchFabricLoaderVersionsForMc(mc)
         .then(setFabList)
         .catch(() => setFabList([]));
   }, [mc, loader]);
@@ -123,17 +134,12 @@ export function CreateInstancePage() {
             value={name}
             onChange={(e) => setName(e.target.value)}
           />
-          <FieldSelect
-            label="Versión de Minecraft"
+          <VersionSelector
+            catalog={catalog}
             value={mc}
-            onChange={(e) => setMc(e.target.value)}
-          >
-            {versions.map((v) => (
-              <option key={v} value={v} className="bg-canvas-deep">
-                {v}
-              </option>
-            ))}
-          </FieldSelect>
+            onChange={setMc}
+            loading={catalogLoading}
+          />
 
           <div>
             <span className="field-label">Mod loader</span>
@@ -214,6 +220,35 @@ export function CreateInstancePage() {
           </div>
         </Card>
       </div>
+
+      <Card eyebrow="Modpack" title="Importar modpack CurseForge">
+        <p className="mb-3 text-[12px] text-ink-muted">
+          Importa un modpack desde carpeta extraída o archivo ZIP (p. ej. Prominence
+          II). Necesitas una API key de CurseForge en Ajustes.
+        </p>
+        <ModpackImportProgressBar
+          progress={modpackImport.progress}
+          error={modpackImport.error}
+        />
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button
+            type="button"
+            className="btn"
+            disabled={modpackImport.busy}
+            onClick={() => void modpackImport.pickFolder()}
+          >
+            Carpeta del modpack
+          </button>
+          <button
+            type="button"
+            className="btn"
+            disabled={modpackImport.busy}
+            onClick={() => void modpackImport.pickZip()}
+          >
+            Archivo ZIP
+          </button>
+        </div>
+      </Card>
 
       <Card eyebrow="Listo" title="Resumen">
         <div className="grid gap-4 sm:grid-cols-4">

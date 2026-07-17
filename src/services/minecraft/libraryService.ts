@@ -63,6 +63,11 @@ export function libraryAllowed(lib: LibraryEntry, os: McOs): boolean {
   return ruleApplies(lib.rules, os, { has_custom_resolution: false });
 }
 
+/** MC ≤1.12: algunas entradas solo publican classifiers (natives), sin artefacto principal. */
+export function isNativesOnlyLibrary(lib: LibraryEntry): boolean {
+  return !!(lib.natives && lib.downloads?.classifiers && !lib.downloads?.artifact);
+}
+
 /** Librerías cuyo artefacto es solo natives (MC 1.20.5+ / 26.x), no van al classpath. */
 export function isNativeLibraryName(name: string | undefined): boolean {
   return !!name && name.includes(":natives-");
@@ -106,7 +111,8 @@ export function libraryArtifactRef(
   os: McOs,
 ): { relPath: string; sha1?: string; url?: string } | null {
   if (!libraryAllowed(lib, os)) return null;
-  if (isNativeLibraryName(lib.name)) return null;
+  if (isNativeLibraryName(lib.name) && !lib.downloads?.artifact) return null;
+  if (isNativesOnlyLibrary(lib)) return null;
   if (lib.downloads?.artifact) {
     return {
       relPath: lib.downloads.artifact.path,

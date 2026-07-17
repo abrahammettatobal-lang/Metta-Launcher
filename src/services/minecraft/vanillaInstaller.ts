@@ -117,7 +117,12 @@ export async function ensureLibrariesDownloaded(
   let done = 0;
   for (const lib of pending) {
     onStep?.(`Downloading ${lib.label}…`, done, pending.length);
-    await downloadFileCmd(`lib-${lib.rel}`, lib.url, lib.rel, lib.sha1 ?? null);
+    try {
+      await downloadFileCmd(`lib-${lib.rel}`, lib.url, lib.rel, lib.sha1 ?? null);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      throw new Error(`No se pudo descargar ${lib.label}: ${msg}`);
+    }
     done += 1;
     onStep?.(`Downloaded ${lib.label}`, done, pending.length);
   }

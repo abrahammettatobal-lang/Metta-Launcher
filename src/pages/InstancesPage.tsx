@@ -1,5 +1,4 @@
 import { openPath } from "@tauri-apps/plugin-opener";
-import { open } from "@tauri-apps/plugin-dialog";
 import { useCallback, useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { useNavigate } from "react-router-dom";
@@ -10,7 +9,6 @@ import {
   instanceBackup,
   instanceDelete,
   instanceGet,
-  instanceImportZip,
   instanceRestoreBackup,
   instanceSave,
   instancesList,
@@ -33,8 +31,13 @@ import {
 import { tap } from "../utils/tap";
 import { fullPath } from "../utils/full-path";
 import { formatBytes, loaderLabel, relativeTime } from "../utils/format";
+import {
+  ModpackImportProgressBar,
+  useModpackImport,
+} from "../components/modpack/ModpackImport";
 
 export function InstancesPage() {
+  const modpackImport = useModpackImport();
   const [rows, setRows] = useState<InstanceRow[]>([]);
   const [sizes, setSizes] = useState<Record<string, number>>({});
   const [backups, setBackups] = useState<BackupListItem[]>([]);
@@ -75,46 +78,28 @@ export function InstancesPage() {
             <button
               type="button"
               className="btn"
+              disabled={modpackImport.busy}
               onClick={() =>
-                tap("Importar ZIP", async () => {
-                  const picked = await open({
-                    multiple: false,
-                    filters: [{ name: "ZIP", extensions: ["zip"] }],
-                  });
-                  if (!picked || Array.isArray(picked)) return;
-                  const base =
-                    picked.split(/[/\\]/).pop()?.replace(/\.zip$/i, "") ??
-                    "Importada";
-                  const name = prompt("Nombre de la instancia:", base);
-                  if (!name?.trim()) return;
-                  const rel = await instanceImportZip(picked, name.trim());
-                  const id = rel.split("/").pop() ?? crypto.randomUUID();
-                  const now = new Date().toISOString();
-                  const row: InstanceRow = {
-                    id,
-                    name: name.trim(),
-                    minecraftVersion: "1.21.1",
-                    loaderType: "vanilla",
-                    loaderVersion: "",
-                    instancePath: rel,
-                    icon: "",
-                    minRamMb: 1024,
-                    maxRamMb: 4096,
-                    javaPath: null,
-                    jvmArgs: "",
-                    gameArgs: "",
-                    gameResolution: null,
-                    lastPlayedAt: null,
-                    createdAt: now,
-                    updatedAt: now,
-                  };
-                  await instanceSave(row);
+                tap("Importar modpack", async () => {
+                  await modpackImport.pickFolder();
                   await reload();
-                  nav(`/instances/${id}/edit`);
                 })
               }
             >
-              <IconDownload width={14} height={14} /> Importar ZIP
+              <IconFolder width={14} height={14} /> Modpack (carpeta)
+            </button>
+            <button
+              type="button"
+              className="btn"
+              disabled={modpackImport.busy}
+              onClick={() =>
+                tap("Importar modpack ZIP", async () => {
+                  await modpackImport.pickZip();
+                  await reload();
+                })
+              }
+            >
+              <IconDownload width={14} height={14} /> Modpack (ZIP)
             </button>
             <button
               type="button"
@@ -127,6 +112,13 @@ export function InstancesPage() {
           </>
         }
       />
+
+      {(modpackImport.progress || modpackImport.error) && (
+        <ModpackImportProgressBar
+          progress={modpackImport.progress}
+          error={modpackImport.error}
+        />
+      )}
 
       {rows.length === 0 ? (
         <Empty

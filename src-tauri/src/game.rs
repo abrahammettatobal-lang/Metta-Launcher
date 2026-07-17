@@ -114,12 +114,8 @@ fn write_java_arg_file(cwd: &Path, args: &[String]) -> Result<PathBuf, String> {
   let mut file = std::fs::File::create(&path).map_err(|e| e.to_string())?;
   for arg in args {
     let arg = paths::strip_extended_path_prefix(arg);
-    if arg.contains([' ', '\t', '"']) {
-      let esc = arg.replace('\\', "\\\\").replace('"', "\\\"");
-      writeln!(file, "\"{esc}\"").map_err(|e| e.to_string())?;
-    } else {
-      writeln!(file, "{arg}").map_err(|e| e.to_string())?;
-    }
+    let esc = arg.replace('\\', "\\\\").replace('"', "\\\"");
+    writeln!(file, "\"{esc}\"").map_err(|e| e.to_string())?;
   }
   Ok(path)
 }
