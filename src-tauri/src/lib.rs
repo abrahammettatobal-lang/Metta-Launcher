@@ -28,6 +28,7 @@ use std::path::{Path, PathBuf};
 use std::io::Read;
 use std::process::{Command, Stdio};
 use std::thread;
+use std::time::{Duration, Instant};
 use std::sync::Arc;
 use tauri::{AppHandle, Manager, State};
 use uuid::Uuid;
@@ -106,6 +107,19 @@ fn resolve_under_launcher_root(db: &Db, raw: &str) -> Result<PathBuf, String> {
     root.join(candidate)
   };
   paths::ensure_path_under_root(&root, &full)
+}
+
+/// Archivos de entrada externos (p. ej. ZIP en Descargas) o rutas relativas bajo el launcher.
+fn resolve_import_archive_path(db: &Db, raw: &str) -> Result<PathBuf, String> {
+  let candidate = Path::new(raw);
+  if candidate.is_absolute() {
+    if !candidate.is_file() {
+      return Err(format!("No se encontró el archivo: {raw}"));
+    }
+    return dunce::canonicalize(candidate)
+      .map_err(|e| format!("No se pudo abrir el archivo: {e}"));
+  }
+  resolve_under_launcher_root(db, raw)
 }
 
 fn du_dir(path: &Path) -> Result<u64, String> {
@@ -424,9 +438,19 @@ async fn download_file_cmd(
   url: String,
   dest_path: String,
   sha1: Option<String>,
+  curseforge_api_key: Option<String>,
 ) -> Result<(), String> {
   let dest = resolve_under_launcher_root(&state.db, &dest_path)?;
-  download::download_to_path(&app, &state.http, &id, &url, &dest, sha1.as_deref()).await?;
+  download::download_to_path(
+    &app,
+    &state.http,
+    &id,
+    &url,
+    &dest,
+    sha1.as_deref(),
+    curseforge_api_key.as_deref(),
+  )
+  .await?;
   Ok(())
 }
 
@@ -548,7 +572,7 @@ fn extract_zip_cmd(state: State<'_, AppState>, zip_path: String, dest_dir: Strin
 
 #[tauri::command]
 fn extract_archive_cmd(state: State<'_, AppState>, archive_path: String, dest_dir: String) -> Result<(), String> {
-  let archive_p = resolve_under_launcher_root(&state.db, &archive_path)?;
+  let archive_p = resolve_import_archive_path(&state.db, &archive_path)?;
   let dest = resolve_under_launcher_root(&state.db, &dest_dir)?;
   extract_archive_file(&archive_p, &dest)
 }
@@ -628,6 +652,8 @@ pub struct RunJavaRequest {
   pub jar_path: String,
   pub work_dir: String,
   pub args: Vec<String>,
+  #[serde(default)]
+  pub timeout_secs: Option<u64>,
 }
 
 #[tauri::command]
@@ -638,6 +664,7 @@ fn run_java_jar(state: State<'_, AppState>, req: RunJavaRequest) -> Result<Strin
   let java = java::resolve_java_executable(&root, &req.java_path)?;
   let mut cmd = Command::new(&java);
   cmd
+    .arg("-Xmx1024M")
     .arg("-jar")
     .arg(&jar)
     .args(&req.args)
@@ -671,9 +698,29 @@ fn run_java_jar(state: State<'_, AppState>, req: RunJavaRequest) -> Result<Strin
       .unwrap_or_default()
   });
 
-  let status = child
-    .wait()
-    .map_err(|e| format!("Fallo esperando instalador: {e}"))?;
+  let timeout = Duration::from_secs(req.timeout_secs.unwrap_or(600));
+  let started = Instant::now();
+  let status = loop {
+    match child.try_wait() {
+      Ok(Some(status)) => break status,
+      Ok(None) => {
+        if started.elapsed() > timeout {
+          let _ = child.kill();
+          let _ = child.wait();
+          let stdout = out_handle.join().unwrap_or_default();
+          let stderr = err_handle.join().unwrap_or_default();
+          let merged = format!("{stdout}{stderr}");
+          return Err(format!(
+            "El instalador superó el tiempo límite ({} s). Última salida:\n{}",
+            timeout.as_secs(),
+            merged.trim()
+          ));
+        }
+        thread::sleep(Duration::from_millis(250));
+      }
+      Err(e) => return Err(format!("Fallo esperando instalador: {e}")),
+    }
+  };
   let stdout = out_handle.join().unwrap_or_default();
   let stderr = err_handle.join().unwrap_or_default();
   let merged = format!("{stdout}{stderr}");
@@ -758,6 +805,8 @@ pub fn run() {
       ensure_folders_and_defaults(&db).expect("bootstrap folders and defaults");
       let http = reqwest::Client::builder()
         .user_agent("MettaLauncher/0.4 (+https://metta-launcher.vercel.app)")
+        .connect_timeout(std::time::Duration::from_secs(30))
+        .timeout(std::time::Duration::from_secs(300))
         .build()
         .expect("http client");
       app.manage(AppState {
@@ -837,6 +886,15 @@ pub fn run() {
       backups_list,
       instance_restore_backup,
       instance_import_zip,
+      modpack_detect_root,
+      modpack_read_manifest,
+      modpack_copy_overrides,
+      modpack_inspect_zip,
+      modpack_copy_tree,
+      modpack_postprocess_instance,
+      modpack_count_mod_jars,
+      curseforge_get_download_info,
+      curseforge_find_compatible_file,
       recorder_get_settings,
       recorder_save_settings,
   recorder_get_status,
@@ -954,7 +1012,373 @@ fn instance_import_zip(
   zip_path: String,
   folder_name: String,
 ) -> Result<String, String> {
+  let _ = folder_name;
   system::import_instance_zip(&state.db, &zip_path, &folder_name)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+fn modpack_detect_root(path: String) -> Result<system::ModpackDetectResult, String> {
+  system::modpack_detect_root(&path)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+fn modpack_inspect_zip(
+  state: State<'_, AppState>,
+  zip_path: String,
+) -> Result<system::ModpackDetectResult, String> {
+  let archive_p = resolve_import_archive_path(&state.db, &zip_path)?;
+  system::modpack_inspect_zip(&archive_p.to_string_lossy())
+}
+
+#[tauri::command(rename_all = "camelCase")]
+fn modpack_copy_tree(
+  state: State<'_, AppState>,
+  pack_root: String,
+  instance_path: String,
+) -> Result<(), String> {
+  system::modpack_copy_tree(&pack_root, &instance_path, &state.db)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+fn modpack_postprocess_instance(
+  state: State<'_, AppState>,
+  instance_path: String,
+) -> Result<(), String> {
+  system::modpack_postprocess_instance(&instance_path, &state.db)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+fn modpack_count_mod_jars(
+  state: State<'_, AppState>,
+  instance_path: String,
+) -> Result<u32, String> {
+  system::modpack_count_mod_jars(&instance_path, &state.db)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+fn modpack_read_manifest(pack_root: String) -> Result<String, String> {
+  system::modpack_read_manifest(&pack_root)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+fn modpack_copy_overrides(
+  state: State<'_, AppState>,
+  pack_root: String,
+  instance_path: String,
+) -> Result<(), String> {
+  system::modpack_copy_overrides(&pack_root, &instance_path, &state.db)
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CurseForgeDependency {
+  project_id: u32,
+  relation_type: u32,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CurseForgeDownloadInfo {
+  project_id: u32,
+  file_id: u32,
+  download_url: String,
+  file_name: String,
+  dependencies: Vec<CurseForgeDependency>,
+}
+
+fn parse_curseforge_dependencies(file_json: &serde_json::Value) -> Vec<CurseForgeDependency> {
+  let mut out = Vec::new();
+  let Some(deps) = file_json.pointer("/data/dependencies").and_then(|v| v.as_array()) else {
+    return out;
+  };
+  for dep in deps {
+    let Some(project_id) = dep.get("modId").and_then(|v| v.as_u64()) else {
+      continue;
+    };
+    let relation_type = dep
+      .get("relationType")
+      .and_then(|v| v.as_u64())
+      .unwrap_or(0) as u32;
+    out.push(CurseForgeDependency {
+      project_id: project_id as u32,
+      relation_type,
+    });
+  }
+  out
+}
+
+fn curseforge_download_info_from_json(
+  project_id: u32,
+  file_id: u32,
+  file_json: &serde_json::Value,
+) -> CurseForgeDownloadInfo {
+  let file_name = file_json
+    .pointer("/data/fileName")
+    .and_then(|v| v.as_str())
+    .unwrap_or("mod.jar")
+    .to_string();
+  let download_url = file_json
+    .pointer("/data/downloadUrl")
+    .and_then(|v| v.as_str())
+    .filter(|s| !s.is_empty())
+    .map(str::to_string)
+    .unwrap_or_else(|| curseforge_cdn_url(file_id, &file_name));
+  CurseForgeDownloadInfo {
+    project_id,
+    file_id,
+    download_url,
+    file_name,
+    dependencies: parse_curseforge_dependencies(file_json),
+  }
+}
+
+fn curseforge_loader_type(loader: &str) -> u32 {
+  match loader {
+    "forge" => 1,
+    "fabric" => 4,
+    "quilt" => 5,
+    "neoforge" => 6,
+    _ => 0,
+  }
+}
+
+fn curseforge_loader_label_matches(entry: &str, loader_type: &str) -> bool {
+  let lower = entry.to_lowercase();
+  match loader_type {
+    "fabric" => lower == "fabric",
+    "quilt" => lower == "quilt",
+    "forge" => lower == "forge",
+    "neoforge" => lower == "neoforge",
+    _ => true,
+  }
+}
+
+fn curseforge_file_matches(
+  file: &serde_json::Value,
+  game_version: &str,
+  loader_type: &str,
+) -> bool {
+  let Some(versions) = file.get("gameVersions").and_then(|v| v.as_array()) else {
+    return false;
+  };
+  let mut has_mc = false;
+  let mut loader_tags: Vec<String> = Vec::new();
+  for v in versions {
+    let Some(s) = v.as_str() else { continue };
+    if s == game_version {
+      has_mc = true;
+    } else if !s.contains('.') {
+      loader_tags.push(s.to_lowercase());
+    }
+  }
+  if !has_mc {
+    return false;
+  }
+  if loader_type.is_empty() || loader_type == "vanilla" {
+    return true;
+  }
+  if loader_tags.is_empty() {
+    return true;
+  }
+  loader_tags
+    .iter()
+    .any(|tag| curseforge_loader_label_matches(tag, loader_type))
+}
+
+async fn curseforge_fetch_mod_files(
+  http: &reqwest::Client,
+  api_key: &str,
+  project_id: u32,
+  game_version: &str,
+  mod_loader_type: Option<u32>,
+) -> Result<Vec<serde_json::Value>, String> {
+  let mut url = format!(
+    "https://api.curseforge.com/v1/mods/{project_id}/files?gameVersion={}&pageSize=50&sortField=2&sortOrder=desc",
+    urlencoding::encode(game_version)
+  );
+  if let Some(loader) = mod_loader_type.filter(|l| *l > 0) {
+    url.push_str(&format!("&modLoaderType={loader}"));
+  }
+  let res = http
+    .get(&url)
+    .header("x-api-key", api_key)
+    .header("Accept", "application/json")
+    .send()
+    .await
+    .map_err(|e| format!("CurseForge API: {e}"))?;
+  if !res.status().is_success() {
+    return Err(format!(
+      "CurseForge API error {} al listar archivos del mod {project_id}",
+      res.status()
+    ));
+  }
+  let json: serde_json::Value = res.json().await.map_err(|e| format!("CurseForge API JSON: {e}"))?;
+  Ok(json
+    .get("data")
+    .and_then(|v| v.as_array())
+    .map(|arr| arr.iter().cloned().collect())
+    .unwrap_or_default())
+}
+
+async fn curseforge_mod_display_name(
+  http: &reqwest::Client,
+  api_key: &str,
+  project_id: u32,
+) -> String {
+  let url = format!("https://api.curseforge.com/v1/mods/{project_id}");
+  let Ok(res) = http
+    .get(&url)
+    .header("x-api-key", api_key)
+    .header("Accept", "application/json")
+    .send()
+    .await
+  else {
+    return format!("mod {project_id}");
+  };
+  if !res.status().is_success() {
+    return format!("mod {project_id}");
+  }
+  let Ok(json) = res.json::<serde_json::Value>().await else {
+    return format!("mod {project_id}");
+  };
+  json
+    .pointer("/data/name")
+    .and_then(|v| v.as_str())
+    .unwrap_or("mod desconocido")
+    .to_string()
+}
+
+fn curseforge_cdn_url(file_id: u32, file_name: &str) -> String {
+  let id = file_id.to_string();
+  let (part1, part2) = if id.len() <= 4 {
+    (id, "0".to_string())
+  } else {
+    (id[..4].to_string(), id[4..].to_string())
+  };
+  format!(
+    "https://edge.forgecdn.net/files/{}/{}/{}",
+    part1,
+    part2,
+    urlencoding::encode(file_name)
+  )
+}
+
+#[tauri::command(rename_all = "camelCase")]
+async fn curseforge_get_download_info(
+  state: State<'_, AppState>,
+  project_id: u32,
+  file_id: u32,
+  api_key: String,
+) -> Result<CurseForgeDownloadInfo, String> {
+  let key = api_key.trim();
+  if key.is_empty() {
+    return Err(
+      "Configura tu CurseForge API Key en Ajustes para importar modpacks.".into(),
+    );
+  }
+
+  let file_url = format!(
+    "https://api.curseforge.com/v1/mods/{project_id}/files/{file_id}"
+  );
+  let file_res = state
+    .http
+    .get(&file_url)
+    .header("x-api-key", key)
+    .header("Accept", "application/json")
+    .send()
+    .await
+    .map_err(|e| format!("CurseForge API: {e}"))?;
+  if !file_res.status().is_success() {
+    return Err(format!(
+      "CurseForge API error {} al consultar mod {project_id} file {file_id}",
+      file_res.status()
+    ));
+  }
+  let file_json: serde_json::Value = file_res
+    .json()
+    .await
+    .map_err(|e| format!("CurseForge API JSON: {e}"))?;
+
+  Ok(curseforge_download_info_from_json(project_id, file_id, &file_json))
+}
+
+#[tauri::command(rename_all = "camelCase")]
+async fn curseforge_find_compatible_file(
+  state: State<'_, AppState>,
+  project_id: u32,
+  game_version: String,
+  loader_type: String,
+  api_key: String,
+) -> Result<CurseForgeDownloadInfo, String> {
+  let key = api_key.trim();
+  if key.is_empty() {
+    return Err(
+      "Configura tu CurseForge API Key en Ajustes para importar modpacks.".into(),
+    );
+  }
+
+  let gv = game_version.trim();
+  let lt = loader_type.trim();
+  let loader = curseforge_loader_type(lt);
+
+  let mut candidates = curseforge_fetch_mod_files(&state.http, key, project_id, gv, Some(loader))
+    .await
+    .unwrap_or_default();
+  if !candidates
+    .iter()
+    .any(|f| curseforge_file_matches(f, gv, lt))
+  {
+    let mut extra =
+      curseforge_fetch_mod_files(&state.http, key, project_id, gv, None).await.unwrap_or_default();
+    for file in extra.drain(..) {
+      let id = file.get("id").and_then(|v| v.as_u64());
+      if candidates
+        .iter()
+        .any(|c| c.get("id").and_then(|v| v.as_u64()) == id)
+      {
+        continue;
+      }
+      candidates.push(file);
+    }
+  }
+
+  let Some(file) = candidates
+    .iter()
+    .find(|f| curseforge_file_matches(f, gv, lt))
+  else {
+    let name = curseforge_mod_display_name(&state.http, key, project_id).await;
+    return Err(format!(
+      "No hay versión de {name} ({project_id}) compatible con {lt} {gv} (p. ej. dependencia de otro loader)"
+    ));
+  };
+  let file_id = file
+    .get("id")
+    .and_then(|v| v.as_u64())
+    .ok_or_else(|| format!("Archivo de CurseForge inválido para mod {project_id}"))? as u32;
+
+  let file_url = format!(
+    "https://api.curseforge.com/v1/mods/{project_id}/files/{file_id}"
+  );
+  let file_res = state
+    .http
+    .get(&file_url)
+    .header("x-api-key", key)
+    .header("Accept", "application/json")
+    .send()
+    .await
+    .map_err(|e| format!("CurseForge API: {e}"))?;
+  if !file_res.status().is_success() {
+    return Err(format!(
+      "CurseForge API error {} al consultar mod {project_id} file {file_id}",
+      file_res.status()
+    ));
+  }
+  let file_json: serde_json::Value = file_res
+    .json()
+    .await
+    .map_err(|e| format!("CurseForge API JSON: {e}"))?;
+
+  Ok(curseforge_download_info_from_json(project_id, file_id, &file_json))
 }
 
 // ─── Bedrock (Windows-only at runtime; commands are always registered so the

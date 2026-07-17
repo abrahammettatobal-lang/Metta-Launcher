@@ -88,6 +88,7 @@ pub async fn install_ffmpeg(app: &AppHandle, client: &Client) -> Result<String, 
       FFMPEG_DOWNLOAD_URL,
       &zip_path,
       None,
+      None,
     )
     .await?;
 
@@ -116,6 +117,7 @@ pub async fn install_ffmpeg(app: &AppHandle, client: &Client) -> Result<String, 
       "ffmpeg-install",
       FFMPEG_DOWNLOAD_URL,
       &archive,
+      None,
       None,
     )
     .await?;
@@ -179,7 +181,7 @@ async fn download_ffmpeg_zip(
 
   let mut last_err = String::from("No hay URLs de descarga de FFmpeg configuradas.");
   for url in urls {
-    match download_to_path(app, client, "ffmpeg-install", &url, dest, None).await {
+    match download_to_path(app, client, "ffmpeg-install", &url, dest, None, None).await {
       Ok(()) => return Ok(()),
       Err(e) => last_err = e,
     }

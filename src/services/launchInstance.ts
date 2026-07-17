@@ -7,11 +7,12 @@ import {
   settingGet,
   spawnJavaGame,
   stopJavaGame,
+  modpackCountModJars,
   accountsList,
 } from "./bridge";
 import type { InstanceRow } from "./bridge";
 import { installFabricSide } from "./minecraft/fabricInstaller";
-import { installForgeSide } from "./minecraft/forgeInstaller";
+import { installForgeSide, listForgeVersions } from "./minecraft/forgeInstaller";
 import { installNeoForgeSide } from "./minecraft/neoforgeInstaller";
 import { buildLaunchCommand, filterLaunchArgsForJava, type LaunchReplacements } from "./minecraft/launchCommandService";
 import {
@@ -41,6 +42,7 @@ import {
   abortLaunch,
 } from "./launchProgress";
 import { recorderGetSettings, recorderStart } from "./recorder/recorderService";
+import { repairModpackModExtensions } from "./minecraft/modpackModFiles";
 
 export { listForgeVersions } from "./minecraft/forgeInstaller";
 export { listNeoForgeVersions } from "./minecraft/neoforgeInstaller";
@@ -167,7 +169,51 @@ async function runLaunchPipeline(instanceId: string): Promise<void> {
   await mkdirAllCmd(`${inst.instancePath}/saves`);
   await mkdirAllCmd(`${inst.instancePath}/resourcepacks`);
   await mkdirAllCmd(`${inst.instancePath}/shaderpacks`);
+  if (inst.loaderType !== "vanilla") {
+    const fixed = await repairModpackModExtensions(inst.instancePath);
+    if (fixed > 0) {
+      await log(
+        "info",
+        `Reparados ${fixed} mod(s): renombrados de .zip a .jar para que el loader los detecte.`,
+        instanceId,
+      );
+    }
+    const modCount = await modpackCountModJars(inst.instancePath);
+    if (modCount === 0) {
+      await log(
+        "warn",
+        "La carpeta mods/ está vacía. Importa un modpack o añade mods antes de jugar.",
+        instanceId,
+      );
+    }
+  }
   profiler.end("Preparando");
+
+  const vanillaProgress = (instanceId: string) => async (m: string, done?: number, total?: number) => {
+    if (m.startsWith("assets ")) {
+      const [, rest] = m.split(" ");
+      const [d, t] = rest.split("/");
+      if (t && d) {
+        profiler.end("Librerías");
+        profiler.start("Assets");
+        progressAssets(Number(d), Number(t));
+      }
+    } else if (m.includes("native")) {
+      profiler.end("Assets");
+      profiler.start("Natives");
+      progressNatives(m);
+    } else if (
+      m.includes("librar") ||
+      m.startsWith("Downloading ") ||
+      m.startsWith("Downloaded ") ||
+      m.startsWith("Fetching ") ||
+      m.startsWith("Using cached") ||
+      m.startsWith("Asset ")
+    ) {
+      progressLibraries(m, done, total);
+    }
+    await log("info", m, instanceId);
+  };
 
   // ─── Java ───────────────────────────────────────────────────────────────────
   checkAbort();
@@ -187,50 +233,22 @@ async function runLaunchPipeline(instanceId: string): Promise<void> {
   if (inst.loaderType === "vanilla") {
     profiler.start("Librerías");
     progressLibraries("Vanilla: instalando librerías…");
-    merged = await installVanillaSide(inst.minecraftVersion, os, nativesRel, async (m, done, total) => {
-      if (m.startsWith("assets ")) {
-        const [, rest] = m.split(" ");
-        const [d, t] = rest.split("/");
-        if (t && d) {
-          profiler.end("Librerías");
-          profiler.start("Assets");
-          progressAssets(Number(d), Number(t));
-        }
-      } else {
-        if (m.includes("native")) {
-          profiler.end("Assets");
-          profiler.start("Natives");
-          progressNatives(m);
-        } else if (m.includes("librar") || m.startsWith("Downloading ") || m.startsWith("Downloaded ")) {
-          progressLibraries(m, done, total);
-        }
-        await log("info", m, instanceId);
-      }
-    });
+    merged = await installVanillaSide(
+      inst.minecraftVersion,
+      os,
+      nativesRel,
+      vanillaProgress(instanceId),
+    );
     profiler.end("Natives");
   } else if (inst.loaderType === "fabric") {
     profiler.start("Librerías");
     progressLibraries("Vanilla: instalando librerías base…");
-    await installVanillaSide(inst.minecraftVersion, os, nativesRel, async (m, done, total) => {
-      if (m.startsWith("assets ")) {
-        const [, rest] = m.split(" ");
-        const [d, t] = rest.split("/");
-        if (t && d) {
-          profiler.end("Librerías");
-          profiler.start("Assets");
-          progressAssets(Number(d), Number(t));
-        }
-      } else {
-        if (m.includes("native")) {
-          profiler.end("Assets");
-          profiler.start("Natives");
-          progressNatives(m);
-        } else if (m.includes("librar") || m.startsWith("Downloading ") || m.startsWith("Downloaded ")) {
-          progressLibraries(m, done, total);
-        }
-        await log("info", m, instanceId);
-      }
-    });
+    await installVanillaSide(
+      inst.minecraftVersion,
+      os,
+      nativesRel,
+      vanillaProgress(instanceId),
+    );
     profiler.end("Natives");
     profiler.start("Loader");
     progressLoader(`Fabric: instalando loader ${inst.loaderVersion}…`);
@@ -243,11 +261,37 @@ async function runLaunchPipeline(instanceId: string): Promise<void> {
   } else if (inst.loaderType === "forge") {
     profiler.start("Librerías");
     progressLibraries("Vanilla: instalando librerías base…");
-    await installVanillaSide(inst.minecraftVersion, os, nativesRel, async () => undefined);
-    profiler.end("Librerías");
+    await installVanillaSide(
+      inst.minecraftVersion,
+      os,
+      nativesRel,
+      vanillaProgress(instanceId),
+    );
+    profiler.end("Natives");
     profiler.start("Loader");
-    progressLoader(`Forge: instalando loader ${inst.loaderVersion}…`);
-    merged = await installForgeSide(javaPath, root, inst.minecraftVersion, inst.loaderVersion);
+    let forgeKey = inst.loaderVersion.trim();
+    if (!forgeKey) {
+      progressLoader(`Forge: buscando versión para ${inst.minecraftVersion}…`);
+      const versions = await listForgeVersions(inst.minecraftVersion);
+      forgeKey = versions[0] ?? "";
+      if (!forgeKey) {
+        throw new Error(
+          `No se encontró Forge para Minecraft ${inst.minecraftVersion}. ` +
+            "Abre la instancia y elige una versión de Forge.",
+        );
+      }
+    }
+    progressLoader(`Forge: instalando ${forgeKey}…`);
+    merged = await installForgeSide(
+      javaPath,
+      root,
+      inst.minecraftVersion,
+      forgeKey,
+      async (msg) => {
+        progressLoader(msg);
+        await log("info", msg, instanceId);
+      },
+    );
     merged = await mergeInheritedVersionJson(merged);
     await ensureLibrariesDownloaded(merged, os, async (m, done, total) => {
       progressLibraries(m, done, total);
@@ -257,8 +301,13 @@ async function runLaunchPipeline(instanceId: string): Promise<void> {
   } else if (inst.loaderType === "neoforge") {
     profiler.start("Librerías");
     progressLibraries("Vanilla: instalando librerías base…");
-    await installVanillaSide(inst.minecraftVersion, os, nativesRel, async () => undefined);
-    profiler.end("Librerías");
+    await installVanillaSide(
+      inst.minecraftVersion,
+      os,
+      nativesRel,
+      vanillaProgress(instanceId),
+    );
+    profiler.end("Natives");
     profiler.start("Loader");
     progressLoader(`NeoForge: instalando loader ${inst.loaderVersion}…`);
     merged = await installNeoForgeSide(javaPath, root, inst.loaderVersion);

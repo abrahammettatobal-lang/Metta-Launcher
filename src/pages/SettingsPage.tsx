@@ -54,6 +54,7 @@ export function SettingsPage() {
   const [autoCheckUpdates, setAutoCheckUpdates] = useState(true);
   const [autoInstallUpdates, setAutoInstallUpdates] = useState(false);
   const [msClientId, setMsClientId] = useState("");
+  const [curseforgeKey, setCurseforgeKey] = useState("");
   const [detected, setDetected] = useState<
     Array<{ path: string; version: string | null }>
   >([]);
@@ -87,6 +88,7 @@ export function SettingsPage() {
         (await settingGet("autoInstallUpdates")) === "true",
       );
       setMsClientId((await settingGet("microsoftClientId")) || "");
+      setCurseforgeKey((await settingGet("curseforgeApiKey")) || "");
     })();
   }, []);
 
@@ -100,6 +102,7 @@ export function SettingsPage() {
       await settingSet("autoCheckUpdates", String(autoCheckUpdates));
       await settingSet("autoInstallUpdates", String(autoInstallUpdates));
       await settingSet("microsoftClientId", msClientId.trim());
+      await settingSet("curseforgeApiKey", curseforgeKey.trim());
       await logAppend("launcher", "info", "Ajustes guardados");
       setSaved("ok");
       setTimeout(() => setSaved(null), 2200);
@@ -289,6 +292,18 @@ export function SettingsPage() {
               onChange={setAutoInstallUpdates}
               title="Instalar actualizaciones automáticamente"
               description="Si hay versión nueva, Metta la descarga e instala encima de la actual y se reinicia solo. Sin desinstalar ni descargar instaladores."
+            />
+          </Card>
+
+          <Card eyebrow="Integraciones" title="CurseForge">
+            <Field
+              label="API Key"
+              type="password"
+              placeholder="Pega tu API key de CurseForge for Studios"
+              inputClassName="font-mono text-xs"
+              value={curseforgeKey}
+              onChange={(e) => setCurseforgeKey(e.target.value)}
+              hint="Obligatoria para importar modpacks (p. ej. Prominence II). Obtén una en console.curseforge.com."
             />
           </Card>
 

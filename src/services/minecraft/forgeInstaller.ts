@@ -28,12 +28,26 @@ async function ensureLauncherProfilesStub(): Promise<void> {
 function forgeVersionFolderCandidates(forgeKey: string): string[] {
   const parts = forgeKey.split("-");
   const mc = parts[0];
-  const forgeVer = parts.slice(1).join("-");
-  const out = [forgeKey];
-  if (forgeVer) {
-    out.push(`${mc}-forge-${forgeVer}`);
+  const out = new Set<string>([forgeKey]);
+  if (parts.length >= 2) {
+    const forgeVer = parts.slice(1).join("-");
+    out.add(`${mc}-forge-${forgeVer}`);
+    const legacyForge = forgeVer.match(/^(\d+\.\d+\.\d+\.\d+)/);
+    if (legacyForge) {
+      out.add(`${mc}-Forge${legacyForge[1]}`);
+    }
   }
-  return out;
+  return [...out];
+}
+
+async function readInstalledForgeVersion(
+  forgeKey: string,
+): Promise<McVersionJson | null> {
+  try {
+    return await readVersionJsonFromCandidates(forgeVersionFolderCandidates(forgeKey));
+  } catch {
+    return null;
+  }
 }
 
 async function readVersionJsonFromCandidates(
@@ -61,6 +75,17 @@ async function readVersionJsonFromCandidates(
     }
   }
 
+  const mc = candidates[0]?.split("-")[0];
+  if (mc) {
+    for (const dir of dirs) {
+      if (!dir.startsWith(`${mc}-Forge`) && !dir.startsWith(`${mc}-forge`)) continue;
+      const jsonPath = `${verDir}/${dir}/${dir}.json`;
+      if (!(await pathExists(jsonPath))) continue;
+      const txt = await readTextFile(jsonPath);
+      return JSON.parse(txt) as McVersionJson;
+    }
+  }
+
   throw new Error(
     `Forge installer did not create a known version folder (${candidates.join(", ")})`,
   );
@@ -75,22 +100,35 @@ export async function installForgeSide(
   launcherRoot: string,
   _mc: string,
   forgeKey: string,
+  onStep?: (msg: string) => void,
 ): Promise<McVersionJson> {
+  const existing = await readInstalledForgeVersion(forgeKey);
+  if (existing) {
+    onStep?.("Forge: usando instalación existente.");
+    return existing;
+  }
+
   const slug = forgeKey;
   const workRel = `shared/forge_runs/${slug}`;
   const jarRel = `${workRel}/forge-installer.jar`;
   const installerUrl = `https://maven.minecraftforge.net/net/minecraftforge/forge/${slug}/forge-${slug}-installer.jar`;
   await mkdirAllCmd(workRel);
   if (!(await pathExists(jarRel))) {
+    onStep?.("Forge: descargando instalador…");
     await downloadFileCmd(`forge-installer-${slug}`, installerUrl, jarRel, undefined);
   }
   await ensureLauncherProfilesStub();
   const root = launcherRoot.replace(/\\/g, "/");
-  await runJavaJar({
+  onStep?.("Forge: ejecutando instalador (en 1.7.10 puede tardar varios minutos)…");
+  const output = await runJavaJar({
     javaPath,
     jarPath: jarRel,
     workDir: workRel,
     args: ["--installClient", root],
+    timeoutSecs: 900,
   });
+  if (output.trim()) {
+    onStep?.(output.trim().split(/\r?\n/).slice(-3).join(" "));
+  }
   return readVersionJsonFromCandidates(forgeVersionFolderCandidates(forgeKey));
 }

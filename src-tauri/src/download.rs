@@ -26,6 +26,7 @@ pub async fn download_to_path(
   url: &str,
   dest: &Path,
   expected_sha1_hex: Option<&str>,
+  curseforge_api_key: Option<&str>,
 ) -> Result<(), String> {
   if dest.is_file() {
     if let Some(expected) = expected_sha1_hex {
@@ -67,7 +68,18 @@ pub async fn download_to_path(
   let mut attempt = 0u32;
   loop {
     attempt += 1;
-    match download_once(client, app, id, url, &tmp, dest, expected_sha1_hex).await {
+    match download_once(
+      client,
+      app,
+      id,
+      url,
+      &tmp,
+      dest,
+      expected_sha1_hex,
+      curseforge_api_key,
+    )
+    .await
+    {
       Ok(()) => {
         let len = dest.metadata().map(|m| m.len()).unwrap_or(0);
         app
@@ -110,6 +122,11 @@ pub async fn download_to_path(
   }
 }
 
+fn is_curseforge_cdn(url: &str) -> bool {
+  let lower = url.to_ascii_lowercase();
+  lower.contains("forgecdn.net/") || lower.contains("curseforge.com/")
+}
+
 async fn download_once(
   client: &Client,
   app: &AppHandle,
@@ -118,24 +135,26 @@ async fn download_once(
   tmp: &Path,
   dest: &Path,
   expected_sha1_hex: Option<&str>,
+  curseforge_api_key: Option<&str>,
 ) -> Result<(), String> {
-  let res = client
-    .get(url)
-    .send()
-    .await
-    .map_err(|e| format!("Red: {e}"))?;
+  let mut req = client.get(url);
+  if is_curseforge_cdn(url) {
+    if let Some(key) = curseforge_api_key.map(str::trim).filter(|k| !k.is_empty()) {
+      req = req.header("x-api-key", key);
+    }
+  }
+  let res = req.send().await.map_err(|e| format!("Red: {e}"))?;
   if !res.status().is_success() {
     let status = res.status();
     let msg = match status.as_u16() {
-      404 => format!(
-        "Error 404: el archivo de FFmpeg no está disponible en el servidor.\n{url}"
-      ),
-      403 => format!("Error 403: acceso denegado al descargar FFmpeg.\n{url}"),
+      404 => format!("Error 404: archivo no encontrado en el servidor.\n{url}"),
+      403 => format!("Error 403: acceso denegado al descargar.\n{url}"),
+      401 => format!("Error 401: API key de CurseForge inválida o ausente.\n{url}"),
       500..=599 => format!(
         "Error {}: el servidor de descarga no responde correctamente.\n{url}",
         status.as_u16()
       ),
-      _ => format!("Error HTTP {} al descargar FFmpeg.\n{url}", status.as_u16()),
+      _ => format!("Error HTTP {} al descargar.\n{url}", status.as_u16()),
     };
     return Err(msg);
   }

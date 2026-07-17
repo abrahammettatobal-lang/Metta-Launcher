@@ -160,12 +160,14 @@ export async function downloadFileCmd(
   url: string,
   destPath: string,
   sha1?: string | null,
+  curseforgeApiKey?: string | null,
 ): Promise<void> {
   await invoke("download_file_cmd", {
     id,
     url,
     destPath,
     sha1: sha1 ?? null,
+    curseforgeApiKey: curseforgeApiKey ?? null,
   });
 }
 
@@ -248,6 +250,7 @@ export async function runJavaJar(payload: {
   jarPath: string;
   workDir: string;
   args: string[];
+  timeoutSecs?: number;
 }): Promise<string> {
   return invoke("run_java_jar", { req: payload });
 }
@@ -449,4 +452,90 @@ export async function instanceImportZip(
   folderName: string,
 ): Promise<string> {
   return invoke("instance_import_zip", { zipPath, folderName });
+}
+
+export interface ModpackDetectResult {
+  packRoot: string;
+  manifestPath: string | null;
+  kind: "curseforge" | "bundled";
+  minecraftVersion: string | null;
+  loaderType: string | null;
+  loaderVersion: string | null;
+  modCount: number;
+  suggestedName: string | null;
+}
+
+export async function modpackDetectRoot(path: string): Promise<ModpackDetectResult> {
+  return invoke("modpack_detect_root", { path });
+}
+
+export async function modpackInspectZip(zipPath: string): Promise<ModpackDetectResult> {
+  return invoke("modpack_inspect_zip", { zipPath });
+}
+
+export async function modpackCopyTree(
+  packRoot: string,
+  instancePath: string,
+): Promise<void> {
+  await invoke("modpack_copy_tree", { packRoot, instancePath });
+}
+
+export async function modpackPostprocessInstance(
+  instancePath: string,
+): Promise<void> {
+  await invoke("modpack_postprocess_instance", { instancePath });
+}
+
+export async function modpackCountModJars(instancePath: string): Promise<number> {
+  return invoke("modpack_count_mod_jars", { instancePath });
+}
+
+export async function modpackReadManifest(packRoot: string): Promise<string> {
+  return invoke("modpack_read_manifest", { packRoot });
+}
+
+export async function modpackCopyOverrides(
+  packRoot: string,
+  instancePath: string,
+): Promise<void> {
+  await invoke("modpack_copy_overrides", { packRoot, instancePath });
+}
+
+export interface CurseForgeDependency {
+  projectId: number;
+  relationType: number;
+}
+
+export interface CurseForgeDownloadInfo {
+  projectId: number;
+  fileId: number;
+  downloadUrl: string;
+  fileName: string;
+  dependencies: CurseForgeDependency[];
+}
+
+export async function curseforgeGetDownloadInfo(
+  projectId: number,
+  fileId: number,
+  apiKey: string,
+): Promise<CurseForgeDownloadInfo> {
+  return invoke("curseforge_get_download_info", {
+    projectId,
+    fileId,
+    apiKey,
+  });
+}
+
+export async function curseforgeFindCompatibleFile(
+  projectId: number,
+  gameVersion: string,
+  loaderType: string,
+  apiKey: string,
+): Promise<CurseForgeDownloadInfo> {
+  return invoke("curseforge_find_compatible_file", {
+    projectId,
+    gameVersion,
+    loaderType,
+    apiKey,
+  });
 }
