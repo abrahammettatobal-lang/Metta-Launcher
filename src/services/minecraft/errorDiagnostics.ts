@@ -110,12 +110,27 @@ const PATTERNS: ErrorPattern[] = [
     ],
   },
   {
-    regex: /ClassNotFoundException: net\.minecraft\.client\.main\.Main|no se ha encontrado o cargado la clase principal net\.minecraft/i,
-    title: "Classpath inválido",
-    cause: "Java no pudo cargar el cliente de Minecraft (classpath o rutas incorrectas).",
+    regex: /NoSuchMethodError.*GameRules\.bootstrap|Description: Bootstrap/i,
+    title: "Client.jar modificado incompatible",
+    cause:
+      "Tu client.jar parcheado no coincide con las clases de Minecraft 26.2. " +
+      "Suele ocurrir cuando GameRules u otras clases se editaron mal y falta el método bootstrap().",
     suggestions: [
-      "Actualiza Metta Launcher a la última versión.",
-      "Repara la instancia o borra libraries y vuelve a lanzar.",
+      "No parchees versions/{versión}/{versión}.jar de NeoForge: usa shared/versions/{versión}/{versión}.jar como base.",
+      "Para keepInventory, usa /gamerule keepInventory true o un mod con Mixin (más fiable que parchear el .jar).",
+      "Restaura el JAR original y vuelve a aplicar el cambio con herramientas de bytecode (Recaf, Mixin), no edición parcial.",
+    ],
+  },
+  {
+    regex: /ClassNotFoundException: net\.minecraft\.client\.main\.Main|no se ha encontrado o cargado la clase principal net\.minecraft/i,
+    title: "Client.jar incorrecto en classpath",
+    cause:
+      "Java no encontró la clase Main. En vanilla suele pasar si se usó el JAR bundle de NeoForge " +
+      "(versions/{versión}/{versión}.jar) en lugar del client oficial (shared/versions/).",
+    suggestions: [
+      "Actualiza Metta Launcher y vuelve a lanzar la instancia vanilla.",
+      "Si persiste, borra versions/{versión}/{versión}.jar y deja solo shared/versions/{versión}/{versión}.jar.",
+      "Para client modificado o mods, usa el loader adecuado (NeoForge/Fabric), no vanilla.",
     ],
   },
   {

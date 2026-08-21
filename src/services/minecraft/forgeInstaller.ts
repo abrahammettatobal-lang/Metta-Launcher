@@ -1,14 +1,13 @@
 import {
   downloadFileCmd,
   forgeListVersions as forgeListVersionsCmd,
-  listDirCmd,
   mkdirAllCmd,
   pathExists,
-  readTextFile,
   runJavaJar,
   writeTextFile,
 } from "../bridge";
 import type { McVersionJson } from "./libraryService";
+import { readForgeVersionJson } from "./loaderVersionJson";
 
 /** Forge's installer aborts if there isn't a `launcher_profiles.json` at the root.
  * The file just has to exist with a valid empty-profiles JSON. */
@@ -53,42 +52,7 @@ async function readInstalledForgeVersion(
 async function readVersionJsonFromCandidates(
   candidates: string[],
 ): Promise<McVersionJson> {
-  const verDir = "versions";
-  const vers = await listDirCmd(verDir);
-  const dirs = vers.filter((e) => e.isDir).map((e) => e.name);
-
-  for (const candidate of candidates) {
-    if (!dirs.includes(candidate)) continue;
-    const jsonPath = `${verDir}/${candidate}/${candidate}.json`;
-    if (!(await pathExists(jsonPath))) continue;
-    const txt = await readTextFile(jsonPath);
-    return JSON.parse(txt) as McVersionJson;
-  }
-
-  for (const dir of dirs) {
-    for (const candidate of candidates) {
-      if (!dir.includes(candidate) && !candidate.includes(dir)) continue;
-      const jsonPath = `${verDir}/${dir}/${dir}.json`;
-      if (!(await pathExists(jsonPath))) continue;
-      const txt = await readTextFile(jsonPath);
-      return JSON.parse(txt) as McVersionJson;
-    }
-  }
-
-  const mc = candidates[0]?.split("-")[0];
-  if (mc) {
-    for (const dir of dirs) {
-      if (!dir.startsWith(`${mc}-Forge`) && !dir.startsWith(`${mc}-forge`)) continue;
-      const jsonPath = `${verDir}/${dir}/${dir}.json`;
-      if (!(await pathExists(jsonPath))) continue;
-      const txt = await readTextFile(jsonPath);
-      return JSON.parse(txt) as McVersionJson;
-    }
-  }
-
-  throw new Error(
-    `Forge installer did not create a known version folder (${candidates.join(", ")})`,
-  );
+  return readForgeVersionJson(candidates);
 }
 
 export async function listForgeVersions(mc: string): Promise<string[]> {

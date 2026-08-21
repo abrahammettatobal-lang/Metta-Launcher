@@ -77,6 +77,7 @@ fn recovered_instance_row(id: &str, instance_path: &str) -> InstanceRow {
     jvm_args: String::new(),
     game_args: String::new(),
     game_resolution: None,
+    custom_client_jar: None,
     last_played_at: None,
     created_at: now.clone(),
     updated_at: now,

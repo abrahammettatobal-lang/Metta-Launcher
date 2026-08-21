@@ -36,6 +36,9 @@ export function loaderLabel(loader: string, version?: string): string {
           ? "Forge"
           : loader === "neoforge"
             ? "NeoForge"
-            : loader;
+            : loader === "custom"
+              ? "Client modificado"
+              : loader;
+  if (loader === "custom") return "Client modificado";
   return version && loader !== "vanilla" ? `${name} ${version}` : name;
 }

@@ -11,6 +11,15 @@ interface ChangeGroup {
 
 const CHANGELOG: ChangeGroup[] = [
   {
+    version: "0.8.0",
+    date: "Agosto 2026",
+    highlights: [
+      "Loader Client modificado: JAR personalizado sin verificar SHA1, reempaquetado automático de bundles MC 26.x.",
+      "Fix vanilla/Fabric: prioriza shared/versions/ y evita el JAR bundle de NeoForge en versions/.",
+      "NeoForge 26.2 betas, validación de client.jar y diagnósticos de crash mejorados.",
+    ],
+  },
+  {
     version: "0.7.2",
     date: "Junio 2026",
     highlights: [

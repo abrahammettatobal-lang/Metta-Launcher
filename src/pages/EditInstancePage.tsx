@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
+import { open } from "@tauri-apps/plugin-dialog";
 import {
   instanceGet,
   instanceSave,
@@ -101,6 +102,38 @@ export function EditInstancePage() {
                 setRow({ ...row, gameResolution: e.target.value || null })
               }
             />
+            {row.loaderType === "custom" && (
+              <div className="space-y-2">
+                <Field
+                  label="Ruta del client.jar"
+                  placeholder="shared/versions/26.2/26.2.jar"
+                  value={row.customClientJar ?? ""}
+                  onChange={(e) =>
+                    setRow({ ...row, customClientJar: e.target.value || null })
+                  }
+                />
+                <p className="text-[11px] leading-snug text-ink-muted">
+                  JARs con prefijo <code className="text-[10px]">26.2/</code> se
+                  reempaquetan al lanzar; no se reemplazan por el client oficial.
+                </p>
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() =>
+                    void open({
+                      multiple: false,
+                      filters: [{ name: "JAR", extensions: ["jar"] }],
+                    }).then((sel) => {
+                      if (typeof sel === "string") {
+                        setRow({ ...row, customClientJar: sel });
+                      }
+                    })
+                  }
+                >
+                  Examinar…
+                </button>
+              </div>
+            )}
           </div>
         </Card>
 

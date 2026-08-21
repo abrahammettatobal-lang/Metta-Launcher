@@ -263,6 +263,7 @@ export async function installCurseForgeModpack(
     jvmArgs: "",
     gameArgs: "",
     gameResolution: null,
+    customClientJar: null,
     lastPlayedAt: null,
     createdAt: now,
     updatedAt: now,

@@ -883,6 +883,8 @@ pub fn run() {
       launcher_check_update,
       recommended_java,
       mod_parse_metadata,
+      validate_client_jar,
+      ensure_launchable_client_jar,
       backups_list,
       instance_restore_backup,
       instance_import_zip,
@@ -990,6 +992,24 @@ fn recommended_java(minecraft_version: String) -> u8 {
 #[tauri::command(rename_all = "camelCase")]
 fn mod_parse_metadata(jar_path: String) -> Result<system::ModMetadata, String> {
   Ok(system::parse_mod_jar(Path::new(&jar_path)))
+}
+
+#[tauri::command(rename_all = "camelCase")]
+fn validate_client_jar(
+  state: State<'_, AppState>,
+  jar_path: String,
+) -> Result<system::ClientJarValidation, String> {
+  let p = resolve_under_launcher_root(&state.db, &jar_path)?;
+  Ok(system::validate_client_jar(&p))
+}
+
+#[tauri::command(rename_all = "camelCase")]
+fn ensure_launchable_client_jar(
+  state: State<'_, AppState>,
+  jar_path: String,
+) -> Result<system::LaunchableClientJar, String> {
+  let p = resolve_under_launcher_root(&state.db, &jar_path)?;
+  system::ensure_launchable_client_jar(&state.db, &p)
 }
 
 #[tauri::command]

@@ -38,6 +38,7 @@ export async function installVanillaSide(
   os: McOs,
   nativesRel: string,
   onStep?: (msg: string, done?: number, total?: number) => void,
+  options?: { skipClientJar?: boolean },
 ): Promise<McVersionJson> {
   const vRel = versionJsonRel(minecraftVersion);
   await mkdirAllCmd(`shared/versions/${minecraftVersion}`);
@@ -58,11 +59,15 @@ export async function installVanillaSide(
   }
 
   const client = merged.downloads?.client;
-  if (!client?.url) throw new Error("Version JSON missing client.jar");
+  if (!client?.url && !options?.skipClientJar) {
+    throw new Error("Version JSON missing client.jar");
+  }
   const jarRel = `shared/versions/${minecraftVersion}/${minecraftVersion}.jar`;
-  if (!(await pathExists(jarRel))) {
+  if (options?.skipClientJar) {
+    onStep?.("Client.jar personalizado: omitiendo descarga oficial…");
+  } else if (!(await pathExists(jarRel))) {
     onStep?.("Downloading client.jar…");
-    await downloadFileCmd(`client-${minecraftVersion}`, client.url, jarRel, client.sha1);
+    await downloadFileCmd(`client-${minecraftVersion}`, client!.url, jarRel, client!.sha1);
   } else {
     onStep?.("Using cached client.jar…");
   }

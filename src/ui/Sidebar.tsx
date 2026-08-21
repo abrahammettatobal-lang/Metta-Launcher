@@ -88,7 +88,7 @@ export function Sidebar({ status }: SidebarProps) {
   const [version, setVersion] = useState("…");
 
   useEffect(() => {
-    void getVersion().then(setVersion).catch(() => setVersion("0.7.0"));
+    void getVersion().then(setVersion).catch(() => setVersion("0.8.0"));
   }, []);
 
   useEffect(() => {

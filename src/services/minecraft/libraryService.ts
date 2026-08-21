@@ -1,3 +1,4 @@
+import { pathExists, readTextFile } from "../bridge";
 import type { McArch, McOs } from "./os";
 import { fetchVersionManifest } from "./versionManifestService";
 
@@ -171,27 +172,36 @@ export function nativeArtifactsForOs(
   return nativeArtifactForOs(lib, os) ?? nativeStandaloneArtifactForOs(lib, os, arch);
 }
 
+async function loadInheritedVersionJson(pid: string): Promise<McVersionJson> {
+  for (const rel of [
+    `versions/${pid}/${pid}.json`,
+    `shared/versions/${pid}/${pid}.json`,
+  ]) {
+    if (!(await pathExists(rel))) continue;
+    return JSON.parse(await readTextFile(rel)) as McVersionJson;
+  }
+
+  const manifest = await fetchVersionManifest();
+  const ref = manifest.versions.find((v) => v.id === pid);
+  if (!ref) {
+    throw new Error(
+      `No se pudo resolver herencia ${pid}: la versión no existe en el manifest de Mojang. ` +
+        `Revisa que tu instancia use una versión de Minecraft válida (ej. 1.21.1).`,
+    );
+  }
+  const res = await fetch(ref.url);
+  if (!res.ok) throw new Error(`No se pudo resolver herencia ${pid}: HTTP ${res.status}`);
+  return (await res.json()) as McVersionJson;
+}
+
 export async function mergeInheritedVersionJson(
   base: McVersionJson,
 ): Promise<McVersionJson> {
   let cur: McVersionJson = { ...base };
   const chain: McVersionJson[] = [cur];
-  let manifest: Awaited<ReturnType<typeof fetchVersionManifest>> | null = null;
   while (cur.inheritsFrom) {
     const pid = cur.inheritsFrom;
-    // Mojang's piston-meta package URLs are content-addressed (sha1 in the path),
-    // so we cannot build them by id alone. Resolve the real URL via the manifest.
-    if (!manifest) manifest = await fetchVersionManifest();
-    const ref = manifest.versions.find((v) => v.id === pid);
-    if (!ref) {
-      throw new Error(
-        `No se pudo resolver herencia ${pid}: la versión no existe en el manifest de Mojang. ` +
-          `Revisa que tu instancia use una versión de Minecraft válida (ej. 1.21.1).`,
-      );
-    }
-    const res = await fetch(ref.url);
-    if (!res.ok) throw new Error(`No se pudo resolver herencia ${pid}: HTTP ${res.status}`);
-    const parent = (await res.json()) as McVersionJson;
+    const parent = await loadInheritedVersionJson(pid);
     chain.push(parent);
     cur = parent;
   }

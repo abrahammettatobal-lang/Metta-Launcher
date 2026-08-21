@@ -30,14 +30,42 @@ fn cmp_version_desc(a: &str, b: &str) -> std::cmp::Ordering {
 }
 
 fn neo_series_prefix(mc_version: &str) -> Option<String> {
-  let rest = mc_version.strip_prefix("1.")?;
-  let parts: Vec<&str> = rest.split('.').collect();
-  if parts.is_empty() {
-    return None;
+  if let Some(rest) = mc_version.strip_prefix("1.") {
+    let parts: Vec<&str> = rest.split('.').collect();
+    if parts.is_empty() {
+      return None;
+    }
+    let minor = parts[0];
+    let patch = parts.get(1).copied().unwrap_or("0");
+    return Some(format!("{minor}.{patch}."));
   }
-  let minor = parts[0];
-  let patch = parts.get(1).copied().unwrap_or("0");
-  Some(format!("{minor}.{patch}."))
+  // New Minecraft versioning (26.1.2, 26.2, 26.2-rc-1, …) — NeoForge shares the base prefix.
+  let base = mc_version.split('-').next()?.trim();
+  if base.contains('.') {
+    return Some(format!("{base}."));
+  }
+  None
+}
+
+fn neoforge_for_mc(stable: &[String], all: &[String], mc_version: &str) -> Vec<String> {
+  let Some(prefix) = neo_series_prefix(mc_version) else {
+    return Vec::new();
+  };
+
+  let stable_filtered: Vec<String> = stable
+    .iter()
+    .filter(|v| v.starts_with(&prefix))
+    .cloned()
+    .collect();
+  if !stable_filtered.is_empty() {
+    return stable_filtered;
+  }
+
+  // No stable NeoForge builds for this MC line yet (e.g. 26.2 only has betas).
+  all.iter()
+    .filter(|v| v.starts_with(&prefix))
+    .cloned()
+    .collect()
 }
 
 fn is_stable_loader_version(v: &str) -> bool {
@@ -92,23 +120,19 @@ pub async fn neoforge_list_versions(
     .await
     .map_err(|e| format!("NeoForge metadata: {e}"))?;
 
-  let mut stable: Vec<String> = resp
-    .versions
-    .into_iter()
+  let mut all_versions = resp.versions;
+  all_versions.sort_by(|a, b| cmp_version_desc(a, b));
+
+  let stable: Vec<String> = all_versions
+    .iter()
     .filter(|v| is_stable_loader_version(v))
+    .cloned()
     .collect();
-  stable.sort_by(|a, b| cmp_version_desc(a, b));
 
   if let Some(mc) = mc_version {
-    if let Some(prefix) = neo_series_prefix(&mc) {
-      let filtered: Vec<String> = stable
-        .iter()
-        .filter(|v| v.starts_with(&prefix))
-        .cloned()
-        .collect();
-      if !filtered.is_empty() {
-        return Ok(filtered);
-      }
+    let filtered = neoforge_for_mc(&stable, &all_versions, &mc);
+    if !filtered.is_empty() {
+      return Ok(filtered);
     }
   }
 

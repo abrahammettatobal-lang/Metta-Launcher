@@ -98,9 +98,27 @@ CREATE INDEX IF NOT EXISTS idx_launch_history_instance ON launch_history(instanc
 "#,
       )
       .map_err(|e| e.to_string())?;
+    Self::migrate_schema(&conn)?;
     Ok(Db {
       conn: Mutex::new(conn),
     })
+  }
+
+  fn migrate_schema(conn: &Connection) -> Result<(), String> {
+    let mut stmt = conn
+      .prepare("PRAGMA table_info(instances)")
+      .map_err(|e| e.to_string())?;
+    let cols = stmt
+      .query_map([], |r| r.get::<_, String>(1))
+      .map_err(|e| e.to_string())?
+      .filter_map(|r| r.ok())
+      .collect::<Vec<_>>();
+    if !cols.iter().any(|c| c == "custom_client_jar") {
+      conn
+        .execute("ALTER TABLE instances ADD COLUMN custom_client_jar TEXT", [])
+        .map_err(|e| e.to_string())?;
+    }
+    Ok(())
   }
 
   pub fn setting_get(&self, key: &str) -> Result<Option<String>, String> {
@@ -305,6 +323,7 @@ pub struct InstanceRow {
   pub jvm_args: String,
   pub game_args: String,
   pub game_resolution: Option<String>,
+  pub custom_client_jar: Option<String>,
   pub last_played_at: Option<String>,
   pub created_at: String,
   pub updated_at: String,
@@ -316,7 +335,7 @@ pub fn instances_list(db: &Db) -> Result<Vec<InstanceRow>, String> {
     .prepare(
       "SELECT id, name, minecraft_version, loader_type, loader_version, instance_path, icon,
               min_ram_mb, max_ram_mb, java_path, jvm_args, game_args, game_resolution,
-              last_played_at, created_at, updated_at
+              custom_client_jar, last_played_at, created_at, updated_at
        FROM instances ORDER BY name COLLATE NOCASE",
     )
     .map_err(|e| e.to_string())?;
@@ -336,9 +355,10 @@ pub fn instances_list(db: &Db) -> Result<Vec<InstanceRow>, String> {
         jvm_args: r.get(10)?,
         game_args: r.get(11)?,
         game_resolution: r.get(12)?,
-        last_played_at: r.get(13)?,
-        created_at: r.get(14)?,
-        updated_at: r.get(15)?,
+        custom_client_jar: r.get(13)?,
+        last_played_at: r.get(14)?,
+        created_at: r.get(15)?,
+        updated_at: r.get(16)?,
       })
     })
     .map_err(|e| e.to_string())?;
@@ -355,7 +375,7 @@ pub fn instance_get(db: &Db, id: &str) -> Result<Option<InstanceRow>, String> {
     .prepare(
       "SELECT id, name, minecraft_version, loader_type, loader_version, instance_path, icon,
               min_ram_mb, max_ram_mb, java_path, jvm_args, game_args, game_resolution,
-              last_played_at, created_at, updated_at
+              custom_client_jar, last_played_at, created_at, updated_at
        FROM instances WHERE id = ?1",
     )
     .map_err(|e| e.to_string())?;
@@ -375,9 +395,10 @@ pub fn instance_get(db: &Db, id: &str) -> Result<Option<InstanceRow>, String> {
         jvm_args: r.get(10)?,
         game_args: r.get(11)?,
         game_resolution: r.get(12)?,
-        last_played_at: r.get(13)?,
-        created_at: r.get(14)?,
-        updated_at: r.get(15)?,
+        custom_client_jar: r.get(13)?,
+        last_played_at: r.get(14)?,
+        created_at: r.get(15)?,
+        updated_at: r.get(16)?,
       })
     })
     .optional()
@@ -402,8 +423,8 @@ pub fn instance_upsert(db: &Db, row: &InstanceRow) -> Result<(), String> {
       "INSERT INTO instances(
         id, name, minecraft_version, loader_type, loader_version, instance_path, icon,
         min_ram_mb, max_ram_mb, java_path, jvm_args, game_args, game_resolution,
-        last_played_at, created_at, updated_at
-      ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
+        custom_client_jar, last_played_at, created_at, updated_at
+      ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
       ON CONFLICT(id) DO UPDATE SET
         name = excluded.name,
         minecraft_version = excluded.minecraft_version,
@@ -417,6 +438,7 @@ pub fn instance_upsert(db: &Db, row: &InstanceRow) -> Result<(), String> {
         jvm_args = excluded.jvm_args,
         game_args = excluded.game_args,
         game_resolution = excluded.game_resolution,
+        custom_client_jar = excluded.custom_client_jar,
         last_played_at = excluded.last_played_at,
         updated_at = excluded.updated_at",
       params![
@@ -433,6 +455,7 @@ pub fn instance_upsert(db: &Db, row: &InstanceRow) -> Result<(), String> {
         row.jvm_args,
         row.game_args,
         row.game_resolution,
+        row.custom_client_jar,
         row.last_played_at,
         row.created_at,
         row.updated_at,

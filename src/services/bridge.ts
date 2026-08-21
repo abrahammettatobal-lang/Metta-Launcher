@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 
-export type LoaderType = "vanilla" | "fabric" | "forge" | "neoforge";
+export type LoaderType = "vanilla" | "fabric" | "forge" | "neoforge" | "custom";
 
 export interface AppPaths {
   appDataDir: string;
@@ -70,6 +70,8 @@ export interface InstanceRow {
   jvmArgs: string;
   gameArgs: string;
   gameResolution: string | null;
+  /** Absolute or launcher-relative path to a modified client.jar (loaderType custom). */
+  customClientJar: string | null;
   lastPlayedAt: string | null;
   createdAt: string;
   updatedAt: string;
@@ -427,6 +429,26 @@ export interface ModMetadata {
 
 export async function modParseMetadata(jarPath: string): Promise<ModMetadata> {
   return invoke("mod_parse_metadata", { jarPath });
+}
+
+export interface ClientJarValidation {
+  launchable: boolean;
+  hasStandardMain: boolean;
+  versionPrefixedMain: string | null;
+}
+
+export async function validateClientJar(jarPath: string): Promise<ClientJarValidation> {
+  return invoke("validate_client_jar", { jarPath });
+}
+
+export interface LaunchableClientJar {
+  absPath: string;
+  repacked: boolean;
+  note: string | null;
+}
+
+export async function ensureLaunchableClientJar(jarPath: string): Promise<LaunchableClientJar> {
+  return invoke("ensure_launchable_client_jar", { jarPath });
 }
 
 export interface BackupListItem {

@@ -557,6 +557,226 @@ fn empty_mod_meta() -> ModMetadata {
   }
 }
 
+const CLIENT_MAIN_CLASS: &str = "net/minecraft/client/main/Main.class";
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientJarValidation {
+  pub launchable: bool,
+  pub has_standard_main: bool,
+  pub version_prefixed_main: Option<String>,
+}
+
+/// Checks whether a jar can be launched with vanilla `net.minecraft.client.main.Main`.
+pub fn validate_client_jar(jar_path: &Path) -> ClientJarValidation {
+  let file = match std::fs::File::open(jar_path) {
+    Ok(f) => f,
+    Err(_) => {
+      return ClientJarValidation {
+        launchable: false,
+        has_standard_main: false,
+        version_prefixed_main: None,
+      };
+    }
+  };
+  let mut archive = match zip::ZipArchive::new(std::io::BufReader::new(file)) {
+    Ok(a) => a,
+    Err(_) => {
+      return ClientJarValidation {
+        launchable: false,
+        has_standard_main: false,
+        version_prefixed_main: None,
+      };
+    }
+  };
+
+  if archive.by_name(CLIENT_MAIN_CLASS).is_ok() {
+    return ClientJarValidation {
+      launchable: true,
+      has_standard_main: true,
+      version_prefixed_main: None,
+    };
+  }
+
+  let mut version_prefixed_main: Option<String> = None;
+  for name in archive.file_names() {
+    let name = name.replace('\\', "/");
+    if let Some(prefix) = name.strip_suffix(CLIENT_MAIN_CLASS) {
+      let prefix = prefix.trim_end_matches('/');
+      if prefix.is_empty() || prefix.contains('/') {
+        continue;
+      }
+      version_prefixed_main = Some(prefix.to_string());
+      break;
+    }
+  }
+
+  ClientJarValidation {
+    launchable: false,
+    has_standard_main: false,
+    version_prefixed_main,
+  }
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LaunchableClientJar {
+  pub abs_path: String,
+  pub repacked: bool,
+  pub note: Option<String>,
+}
+
+/// Strips a MC bundle prefix (e.g. `26.2/`) so vanilla `Main` can load from classpath.
+pub fn repack_version_prefixed_client_jar(
+  source: &Path,
+  dest: &Path,
+  prefix: &str,
+) -> Result<(), String> {
+  let prefix_dir = format!("{}/", prefix.trim_end_matches('/'));
+  if let Some(parent) = dest.parent() {
+    std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+  }
+  let tmp = dest.with_extension("part");
+  if tmp.exists() {
+    let _ = std::fs::remove_file(&tmp);
+  }
+
+  let src_file = std::fs::File::open(source).map_err(|e| e.to_string())?;
+  let mut archive =
+    zip::ZipArchive::new(std::io::BufReader::new(src_file)).map_err(|e| e.to_string())?;
+
+  let out_file = std::fs::File::create(&tmp).map_err(|e| e.to_string())?;
+  let mut writer = zip::ZipWriter::new(std::io::BufWriter::new(out_file));
+  let options = zip::write::SimpleFileOptions::default()
+    .compression_method(zip::CompressionMethod::Deflated);
+
+  for i in 0..archive.len() {
+    let mut entry = archive.by_index(i).map_err(|e| e.to_string())?;
+    let name = entry.name().replace('\\', "/");
+    let Some(stripped) = name.strip_prefix(&prefix_dir) else {
+      continue;
+    };
+    if stripped.is_empty() || stripped.ends_with('/') {
+      continue;
+    }
+    writer
+      .start_file(stripped, options)
+      .map_err(|e| e.to_string())?;
+    std::io::copy(&mut entry, &mut writer).map_err(|e| e.to_string())?;
+  }
+
+  writer.finish().map_err(|e| e.to_string())?;
+  std::fs::rename(&tmp, dest).map_err(|e| e.to_string())?;
+  Ok(())
+}
+
+pub fn ensure_launchable_client_jar(db: &Db, jar_path: &Path) -> Result<LaunchableClientJar, String> {
+  let validation = validate_client_jar(jar_path);
+  let abs = jar_path.to_string_lossy().to_string();
+
+  if validation.launchable {
+    assert_client_jar_binary_compatible(jar_path)?;
+    return Ok(LaunchableClientJar {
+      abs_path: abs,
+      repacked: false,
+      note: None,
+    });
+  }
+
+  let prefix = validation.version_prefixed_main.ok_or_else(|| {
+    "El JAR no contiene net.minecraft.client.main.Main en la raíz del ZIP.".to_string()
+  })?;
+
+  let digest = crate::download::sha1_file_hex(jar_path)?;
+  let cache_dir = launcher_root(db).join("shared/cache/repacked-clients");
+  std::fs::create_dir_all(&cache_dir).map_err(|e| e.to_string())?;
+  let dest = cache_dir.join(format!("{digest}.jar"));
+
+  if !dest.is_file() {
+    repack_version_prefixed_client_jar(jar_path, &dest, &prefix)?;
+  }
+
+  if !validate_client_jar(&dest).launchable {
+    let _ = std::fs::remove_file(&dest);
+    return Err(
+      "No se pudo reempaquetar el client.jar personalizado para lanzamiento.".into(),
+    );
+  }
+
+  assert_client_jar_binary_compatible(&dest)?;
+
+  Ok(LaunchableClientJar {
+    abs_path: dest.to_string_lossy().to_string(),
+    repacked: true,
+    note: Some(format!(
+      "Client modificado reempaquetado ({prefix}/ → raíz). Se usa tu JAR, no el oficial de Mojang."
+    )),
+  })
+}
+
+const GAMERULES_CLASS: &str = "net/minecraft/world/level/gamerules/GameRules.class";
+const BOOTSTRAP_METHOD: &[u8] = b"bootstrap";
+
+/// Vanilla 26.x expects `GameRules.bootstrap(Registry)`. Broken client patches often remove it.
+fn client_jar_has_gamerules_bootstrap(jar_path: &Path) -> bool {
+  let file = match std::fs::File::open(jar_path) {
+    Ok(f) => f,
+    Err(_) => return false,
+  };
+  let mut archive = match zip::ZipArchive::new(std::io::BufReader::new(file)) {
+    Ok(a) => a,
+    Err(_) => return false,
+  };
+  let mut entry = match archive.by_name(GAMERULES_CLASS) {
+    Ok(f) => f,
+    Err(_) => return true,
+  };
+  let mut buf = Vec::new();
+  if std::io::Read::read_to_end(&mut entry, &mut buf).is_err() {
+    return false;
+  }
+  buf.windows(BOOTSTRAP_METHOD.len())
+    .any(|window| window == BOOTSTRAP_METHOD)
+}
+
+fn assert_client_jar_binary_compatible(jar_path: &Path) -> Result<(), String> {
+  if client_jar_has_gamerules_bootstrap(jar_path) {
+    return Ok(());
+  }
+  Err(
+    "El client.jar modificado tiene GameRules incompatible (falta el método bootstrap). \
+     El parche rompió clases del juego y no arranca con las librerías vanilla. \
+     Parte de shared/versions/{versión}/{versión}.jar, usa un mod Mixin, \
+     o aplica /gamerule keepInventory true en el mundo."
+      .into(),
+  )
+}
+
+#[cfg(test)]
+mod client_jar_tests {
+  use super::*;
+  use std::path::Path;
+
+  #[test]
+  fn repack_bundle_jar_exposes_main_at_root() {
+    let src = Path::new(r"C:\Users\USER\AppData\Roaming\MettaLauncher\versions\26.2\26.2.jar");
+    if !src.is_file() {
+      return;
+    }
+    let dest = std::env::temp_dir().join("metta-repack-test.jar");
+    let _ = std::fs::remove_file(&dest);
+    repack_version_prefixed_client_jar(src, &dest, "26.2").expect("repack");
+    assert!(
+      validate_client_jar(&dest).launchable,
+      "repacked jar should expose Main at root"
+    );
+    assert!(
+      assert_client_jar_binary_compatible(&dest).is_err(),
+      "user's patched jar should fail bootstrap compatibility check"
+    );
+  }
+}
+
 fn read_zip_entry(f: &mut zip::read::ZipFile<'_>) -> Result<String, String> {
   let mut buf = String::new();
   std::io::Read::read_to_string(f, &mut buf).map_err(|e| e.to_string())?;

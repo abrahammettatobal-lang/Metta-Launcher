@@ -43,6 +43,8 @@ import {
 } from "./launchProgress";
 import { recorderGetSettings, recorderStart } from "./recorder/recorderService";
 import { repairModpackModExtensions } from "./minecraft/modpackModFiles";
+import { resolveLibraryRel, libraryDirectoryRel } from "./minecraft/libraryPathService";
+import { resolveClientJarResolution } from "./minecraft/versionJarService";
 
 export { listForgeVersions } from "./minecraft/forgeInstaller";
 export { listNeoForgeVersions } from "./minecraft/neoforgeInstaller";
@@ -240,6 +242,22 @@ async function runLaunchPipeline(instanceId: string): Promise<void> {
       vanillaProgress(instanceId),
     );
     profiler.end("Natives");
+  } else if (inst.loaderType === "custom") {
+    if (!inst.customClientJar?.trim()) {
+      throw new Error(
+        "Configura la ruta del client.jar personalizado en la instancia antes de jugar.",
+      );
+    }
+    profiler.start("Librerías");
+    progressLibraries("Client modificado: librerías base (sin descargar client.jar)…");
+    merged = await installVanillaSide(
+      inst.minecraftVersion,
+      os,
+      nativesRel,
+      vanillaProgress(instanceId),
+      { skipClientJar: true },
+    );
+    profiler.end("Natives");
   } else if (inst.loaderType === "fabric") {
     profiler.start("Librerías");
     progressLibraries("Vanilla: instalando librerías base…");
@@ -310,12 +328,21 @@ async function runLaunchPipeline(instanceId: string): Promise<void> {
     profiler.end("Natives");
     profiler.start("Loader");
     progressLoader(`NeoForge: instalando loader ${inst.loaderVersion}…`);
-    merged = await installNeoForgeSide(javaPath, root, inst.loaderVersion);
+    merged = await installNeoForgeSide(
+      javaPath,
+      root,
+      inst.loaderVersion,
+      async (msg) => {
+        progressLoader(msg);
+        await log("info", msg, instanceId);
+      },
+    );
     merged = await mergeInheritedVersionJson(merged);
     await ensureLibrariesDownloaded(merged, os, async (m, done, total) => {
       progressLibraries(m, done, total);
       await log("info", m, instanceId);
     });
+    profiler.end("Loader");
   } else {
     throw new Error("Unknown loader");
   }
@@ -323,18 +350,37 @@ async function runLaunchPipeline(instanceId: string): Promise<void> {
   // ─── Classpath ───────────────────────────────────────────────────────────────
   checkAbort();
   profiler.start("Classpath");
+  progressLibraries("Construyendo classpath…");
   const cpSep = os === "windows" ? ";" : ":";
   const seen = new Set<string>();
   const cpParts: string[] = [];
   for (const lib of merged.libraries) {
     const a = libraryArtifactRef(lib, os);
     if (!a) continue;
-    const p = abs(root, `shared/libraries/${a.relPath}`);
+    const libRel = await resolveLibraryRel(a.relPath);
+    if (!libRel) continue;
+    const p = abs(root, libRel);
     if (seen.has(p)) continue;
     seen.add(p);
     cpParts.push(p);
   }
-  cpParts.push(abs(root, `shared/versions/${inst.minecraftVersion}/${inst.minecraftVersion}.jar`));
+  if (inst.loaderType === "custom") {
+    progressLibraries(
+      "Preparando client.jar personalizado (reempaquetado la 1.ª vez puede tardar ~20 s)…",
+    );
+  }
+  const clientJar = await resolveClientJarResolution(
+    root,
+    inst.minecraftVersion,
+    inst.loaderType,
+    merged,
+    inst.customClientJar,
+  );
+  if (clientJar.fallbackNote) {
+    await log("warn", clientJar.fallbackNote, instanceId);
+  }
+  const versionJarAbs = clientJar.absPath;
+  cpParts.push(versionJarAbs);
   const classpath = cpParts.join(cpSep);
   profiler.end("Classpath");
 
@@ -354,11 +400,11 @@ async function runLaunchPipeline(instanceId: string): Promise<void> {
     assets_root: abs(root, "shared/assets"),
     assets_index_name: merged.assetIndex?.id ?? "legacy",
     launcher_name: "MettaLauncher",
-    launcher_version: "0.7.0",
+    launcher_version: "0.8.0",
     classpath,
-    library_directory: abs(root, "shared/libraries"),
+    library_directory: abs(root, libraryDirectoryRel(inst.loaderType)),
     natives_directory: abs(root, nativesRel),
-    primary_jar: abs(root, `shared/versions/${inst.minecraftVersion}/${inst.minecraftVersion}.jar`),
+    primary_jar: versionJarAbs,
     clientid: "metta",
   };
 

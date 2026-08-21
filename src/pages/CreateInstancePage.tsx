@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { open } from "@tauri-apps/plugin-dialog";
 import { motion } from "framer-motion";
 import {
   appPaths,
@@ -52,6 +53,11 @@ const LOADERS: { id: LoaderType; label: string; description: string }[] = [
     label: "NeoForge",
     description: "El fork moderno de Forge para 1.20+.",
   },
+  {
+    id: "custom",
+    label: "Client modificado",
+    description: "Tu propio client.jar; no se descarga ni verifica.",
+  },
 ];
 
 export function CreateInstancePage() {
@@ -66,6 +72,7 @@ export function CreateInstancePage() {
   const [forgeList, setForgeList] = useState<string[]>([]);
   const [neoList, setNeoList] = useState<string[]>([]);
   const [fabList, setFabList] = useState<string[]>([]);
+  const [customJar, setCustomJar] = useState("");
   const [ramMin, setRamMin] = useState(1024);
   const [ramMax, setRamMax] = useState(4096);
 
@@ -143,7 +150,7 @@ export function CreateInstancePage() {
 
           <div>
             <span className="field-label">Mod loader</span>
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
               {LOADERS.map((l) => (
                 <button
                   key={l.id}
@@ -151,6 +158,7 @@ export function CreateInstancePage() {
                   onClick={() => {
                     setLoader(l.id);
                     setLv("");
+                    if (l.id !== "custom") setCustomJar("");
                   }}
                   className={cx(
                     "group flex flex-col items-start gap-1 rounded-xl border px-3 py-3 text-left transition-all duration-200 ease-soft",
@@ -173,7 +181,40 @@ export function CreateInstancePage() {
             </div>
           </div>
 
-          {loader !== "vanilla" && (
+          {loader === "custom" && (
+            <div className="space-y-2">
+              <Field
+                label="Ruta del client.jar"
+                placeholder="shared/versions/26.2/26.2.jar o ruta absoluta"
+                value={customJar}
+                onChange={(e) => setCustomJar(e.target.value)}
+              />
+              <button
+                type="button"
+                className="btn"
+                onClick={() =>
+                  void open({
+                    multiple: false,
+                    filters: [{ name: "JAR", extensions: ["jar"] }],
+                  }).then((sel) => {
+                    if (typeof sel === "string") setCustomJar(sel);
+                  })
+                }
+              >
+                Examinar…
+              </button>
+              <p className="text-[11px] leading-snug text-ink-muted">
+                El launcher descargará librerías y assets de la versión de Minecraft
+                elegida, pero usará tu JAR tal cual (sin comprobar SHA1 ni volver a
+                descargarlo). Si el JAR tiene estructura{" "}
+                <code className="text-[10px]">26.2/net/minecraft/...</code> (bundle de
+                NeoForge), se reempaqueta automáticamente para lanzarlo sin sustituirlo
+                por el oficial.
+              </p>
+            </div>
+          )}
+
+          {loader !== "vanilla" && loader !== "custom" && (
             <FieldSelect
               label="Versión del loader"
               value={lv}
@@ -259,7 +300,9 @@ export function CreateInstancePage() {
             value={
               loader === "vanilla"
                 ? "Vanilla"
-                : `${capitalize(loader)} ${lv || "(elegir)"}`
+                : loader === "custom"
+                  ? "Client modificado"
+                  : `${capitalize(loader)} ${lv || "(elegir)"}`
             }
           />
           <Summary label="RAM" value={`${ramMin}–${ramMax} MB`} />
@@ -273,11 +316,15 @@ export function CreateInstancePage() {
               const id = crypto.randomUUID();
               const root = (await appPaths()).launcherRoot;
               const loaderVersion =
-                loader === "vanilla"
+                loader === "vanilla" || loader === "custom"
                   ? mc
                   : lv || (loader === "fabric" ? fabList[0] ?? "" : "");
-              if (loader !== "vanilla" && !loaderVersion) {
+              if (loader !== "vanilla" && loader !== "custom" && !loaderVersion) {
                 alert("Selecciona una versión del loader.");
+                return;
+              }
+              if (loader === "custom" && !customJar.trim()) {
+                alert("Indica la ruta del client.jar personalizado.");
                 return;
               }
               // The launcher will fall back to globalJvmArgs at launch time;
@@ -296,6 +343,7 @@ export function CreateInstancePage() {
                 jvmArgs: "",
                 gameArgs: "",
                 gameResolution: null,
+                customClientJar: loader === "custom" ? customJar.trim() : null,
                 lastPlayedAt: null,
                 createdAt: new Date().toISOString(),
                 updatedAt: new Date().toISOString(),
