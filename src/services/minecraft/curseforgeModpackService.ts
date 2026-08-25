@@ -62,7 +62,10 @@ export interface ParsedModpackMeta {
   fileCount: number;
 }
 
-function parseLoader(modLoaderId: string): { type: LoaderType; version: string } {
+function parseLoader(
+  modLoaderId: string,
+  mcVersion: string,
+): { type: LoaderType; version: string } {
   const lower = modLoaderId.toLowerCase();
   if (lower.startsWith("fabric-") || lower.startsWith("fabric-loader-")) {
     const prefix = lower.startsWith("fabric-loader-") ? "fabric-loader-" : "fabric-";
@@ -72,7 +75,14 @@ function parseLoader(modLoaderId: string): { type: LoaderType; version: string }
     return { type: "neoforge", version: modLoaderId.slice("neoforge-".length) };
   }
   if (lower.startsWith("forge-")) {
-    return { type: "forge", version: modLoaderId.slice("forge-".length) };
+    const forgePart = modLoaderId.slice("forge-".length);
+    const version =
+      forgePart.includes("-") && /^\d+\.\d+/.test(forgePart)
+        ? forgePart
+        : mcVersion
+          ? `${mcVersion}-${forgePart}`
+          : forgePart;
+    return { type: "forge", version };
   }
   return { type: "vanilla", version: "" };
 }
@@ -152,7 +162,7 @@ export function parseModpackMeta(manifest: CurseForgeModpackManifest): ParsedMod
     manifest.minecraft.modLoaders?.find((l) => l.primary) ??
     manifest.minecraft.modLoaders?.[0];
   const loader = primary
-    ? parseLoader(primary.id)
+    ? parseLoader(primary.id, manifest.minecraft.version)
     : { type: "vanilla" as const, version: "" };
   const recommended = manifest.minecraft.recommendedRam ?? 4096;
   const maxRamMb = Math.max(1024, Math.ceil(recommended / 512) * 512);

@@ -12,7 +12,7 @@ import {
 } from "./bridge";
 import type { InstanceRow } from "./bridge";
 import { installFabricSide } from "./minecraft/fabricInstaller";
-import { installForgeSide, listForgeVersions } from "./minecraft/forgeInstaller";
+import { installForgeSide, listForgeVersions, normalizeForgeKey } from "./minecraft/forgeInstaller";
 import { installNeoForgeSide } from "./minecraft/neoforgeInstaller";
 import { buildLaunchCommand, filterLaunchArgsForJava, type LaunchReplacements } from "./minecraft/launchCommandService";
 import {
@@ -287,7 +287,7 @@ async function runLaunchPipeline(instanceId: string): Promise<void> {
     );
     profiler.end("Natives");
     profiler.start("Loader");
-    let forgeKey = inst.loaderVersion.trim();
+    let forgeKey = normalizeForgeKey(inst.minecraftVersion, inst.loaderVersion.trim());
     if (!forgeKey) {
       progressLoader(`Forge: buscando versión para ${inst.minecraftVersion}…`);
       const versions = await listForgeVersions(inst.minecraftVersion);
@@ -400,7 +400,7 @@ async function runLaunchPipeline(instanceId: string): Promise<void> {
     assets_root: abs(root, "shared/assets"),
     assets_index_name: merged.assetIndex?.id ?? "legacy",
     launcher_name: "MettaLauncher",
-    launcher_version: "0.8.0",
+    launcher_version: "0.8.1",
     classpath,
     library_directory: abs(root, libraryDirectoryRel(inst.loaderType)),
     natives_directory: abs(root, nativesRel),

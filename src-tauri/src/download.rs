@@ -99,7 +99,7 @@ pub async fn download_to_path(
         return Ok(());
       }
       Err(e) => {
-        if attempt >= 5 {
+        if is_non_retryable_download_error(&e) || attempt >= 5 {
           app
             .emit(
               "download://progress",
@@ -125,6 +125,13 @@ pub async fn download_to_path(
 fn is_curseforge_cdn(url: &str) -> bool {
   let lower = url.to_ascii_lowercase();
   lower.contains("forgecdn.net/") || lower.contains("curseforge.com/")
+}
+
+fn is_non_retryable_download_error(err: &str) -> bool {
+  err.contains("Error 404:")
+    || err.contains("Error 403:")
+    || err.contains("Error 401:")
+    || err.contains("SHA1 incorrecto")
 }
 
 async fn download_once(

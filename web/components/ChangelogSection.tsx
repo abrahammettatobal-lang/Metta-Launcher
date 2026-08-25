@@ -11,6 +11,15 @@ interface ChangeGroup {
 
 const CHANGELOG: ChangeGroup[] = [
   {
+    version: "0.8.1",
+    date: "Agosto 2026",
+    highlights: [
+      "Fix Forge: normaliza claves de versión (p. ej. 47.4.20 → 1.20.1-47.4.20) y corrige la descarga del instalador.",
+      "Progreso visible al descargar el instalador de Forge; errores 404/401/403 ya no reintentan en bucle.",
+      "Modpacks CurseForge guardan la clave Forge completa al importar.",
+    ],
+  },
+  {
     version: "0.8.0",
     date: "Agosto 2026",
     highlights: [
