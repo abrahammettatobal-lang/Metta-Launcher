@@ -66,7 +66,7 @@ export async function resolveVersionJarRel(
 }
 
 async function resolveCustomClientJar(
-  root: string,
+  _root: string,
   _minecraftVersion: string,
   customClientJar: string,
 ): Promise<ClientJarResolution> {
