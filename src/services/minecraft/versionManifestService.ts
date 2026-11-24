@@ -20,15 +20,19 @@ async function readCachedManifest(): Promise<VersionManifestV2 | null> {
 }
 
 export async function fetchVersionManifest(): Promise<VersionManifestV2> {
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), 10000);
   try {
-    const res = await fetch(MANIFEST_URL);
+    const res = await fetch(MANIFEST_URL, { signal: controller.signal });
     if (res.ok) {
       const data = (await res.json()) as VersionManifestV2;
-      await writeTextFile(CACHE_REL, JSON.stringify(data));
+      await writeTextFile(CACHE_REL, JSON.stringify(data)).catch(() => {});
       return data;
     }
   } catch {
     /* offline — fall back to cache below */
+  } finally {
+    window.clearTimeout(timer);
   }
 
   const cached = await readCachedManifest();

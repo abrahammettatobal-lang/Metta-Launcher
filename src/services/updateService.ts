@@ -44,28 +44,17 @@ export async function checkAppUpdate(): Promise<AppUpdateStatus> {
     /* builds de desarrollo o sin firma: usar comprobación GitHub */
   }
 
-  try {
-    const fallback = await launcherCheckUpdate();
-    return {
-      native: null,
-      fallback,
-      currentVersion: fallback.currentVersion,
-      updateAvailable: fallback.updateAvailable,
-      latestVersion: fallback.latestVersion,
-      notes: fallback.changelog,
-      releaseUrl: fallback.releaseUrl,
-    };
-  } catch {
-    return {
-      native: null,
-      fallback: null,
-      currentVersion,
-      updateAvailable: false,
-      latestVersion: null,
-      notes: null,
-      releaseUrl: null,
-    };
-  }
+  const fallback = await launcherCheckUpdate();
+  if (!fallback.latestVersion) throw new Error("No se pudo consultar la versión publicada.");
+  return {
+    native: null,
+    fallback,
+    currentVersion: fallback.currentVersion,
+    updateAvailable: fallback.updateAvailable,
+    latestVersion: fallback.latestVersion,
+    notes: fallback.changelog,
+    releaseUrl: fallback.releaseUrl,
+  };
 }
 
 export async function installAppUpdate(

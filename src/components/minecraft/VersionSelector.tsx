@@ -77,6 +77,9 @@ export function VersionSelector({
             Cargando versiones…
           </option>
         )}
+        {value && !groups.some(g => g.versions.some(v => v.id === value)) && (
+          <option value={value}>{value} (seleccionada)</option>
+        )}
         {!loading && totalVisible === 0 && (
           <option value="" className="bg-canvas-deep">
             Sin coincidencias

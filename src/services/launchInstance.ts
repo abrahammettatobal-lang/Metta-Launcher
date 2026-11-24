@@ -36,6 +36,7 @@ import {
   progressLoader,
   progressStarting,
   progressRunning,
+  progressError,
   resetLaunchProgress,
   isLaunchAborted,
   resetAbortFlag,
@@ -43,7 +44,11 @@ import {
 } from "./launchProgress";
 import { recorderGetSettings, recorderStart } from "./recorder/recorderService";
 import { repairModpackModExtensions } from "./minecraft/modpackModFiles";
-import { resolveLibraryRel, libraryDirectoryRel } from "./minecraft/libraryPathService";
+import {
+  resolveLibraryRel,
+  libraryDirectoryRel,
+  loaderUsesLegacyLibraryRoot,
+} from "./minecraft/libraryPathService";
 import { resolveClientJarResolution } from "./minecraft/versionJarService";
 
 export { listForgeVersions } from "./minecraft/forgeInstaller";
@@ -69,17 +74,17 @@ function parseGameExtra(s: string): string[] {
     .filter(Boolean);
 }
 
-/**
- * Tracks the currently-active launch task so that a second `launchInstance`
- * call automatically cancels its predecessor (in-flight install or already
- * running game) before starting.
- */
+let activeGame: { id: string } | null = null;
 let _currentLaunch: Promise<void> | null = null;
 
-/**
- * Cancel any launch / running game and wait for it to fully tear down.
- * Safe to call from anywhere; never throws.
- */
+export function handleGameExit(instanceId: string): void {
+  if (activeGame?.id === instanceId) {
+    activeGame = null;
+    resetLaunchProgress();
+  }
+}
+
+/** Stop a running game and wait for an in-flight installation to unwind. */
 export async function cancelCurrentLaunch(): Promise<void> {
   abortLaunch();
   try {
@@ -121,10 +126,15 @@ export async function launchInstance(instanceId: string): Promise<void> {
   _currentLaunch = task;
   // Clear the slot when the launch finishes — only if we're still the
   // active task (a later launch may have replaced us in the meantime).
-  void task.finally(() => {
+  try {
+    await task;
+  } catch (error) {
+    if (isLaunchAborted()) resetLaunchProgress();
+    else progressError(error instanceof Error ? error.message : String(error));
+    throw error;
+  } finally {
     if (_currentLaunch === task) _currentLaunch = null;
-  });
-  return task;
+  }
 }
 
 async function log(level: string, msg: string, instanceId: string) {
@@ -357,7 +367,9 @@ async function runLaunchPipeline(instanceId: string): Promise<void> {
   for (const lib of merged.libraries) {
     const a = libraryArtifactRef(lib, os);
     if (!a) continue;
-    const libRel = await resolveLibraryRel(a.relPath);
+    const libRel = await resolveLibraryRel(a.relPath, {
+      preferLegacyRoot: loaderUsesLegacyLibraryRoot(inst.loaderType),
+    });
     if (!libRel) continue;
     const p = abs(root, libRel);
     if (seen.has(p)) continue;
@@ -395,7 +407,13 @@ async function runLaunchPipeline(instanceId: string): Promise<void> {
     auth_xuid: session.xuid ?? "",
     version_type: versionType,
     user_type: session.userType,
-    version_name: merged.id,
+    // Prism/CurseForge pass the vanilla MC version so Forge/NeoForge
+    // `-DignoreList=${version_name}.jar` matches 1.21.1.jar, not neoforge-21.1.265.jar.
+    version_name:
+      inst.loaderType === "forge" || inst.loaderType === "neoforge"
+        ? inst.minecraftVersion
+        : merged.id,
+    minecraft_version: inst.minecraftVersion,
     game_directory: abs(root, inst.instancePath),
     assets_root: abs(root, "shared/assets"),
     assets_index_name: merged.assetIndex?.id ?? "legacy",
@@ -439,20 +457,28 @@ async function runLaunchPipeline(instanceId: string): Promise<void> {
   checkAbort();
   progressStarting(`Iniciando Java en ${javaPath}…`);
   await log("info", `Starting Java: ${javaPath}`, instanceId);
-  await spawnJavaGame({
-    javaPath,
-    cwd: rep.game_directory,
-    args: argv,
-    env: [["METTA_LAUNCHER", "1"]],
-    instanceId,
-  });
+  const gameRun = { id: instanceId };
+  activeGame = gameRun;
+  try {
+    await spawnJavaGame({
+      javaPath,
+      cwd: rep.game_directory,
+      args: argv,
+      env: [["METTA_LAUNCHER", "1"]],
+      instanceId,
+    });
+  } catch (error) {
+    if (activeGame === gameRun) activeGame = null;
+    throw error;
+  }
+  if (activeGame !== gameRun) return;
   profiler.end("Proceso Java");
   progressRunning();
   try {
     const rec = await recorderGetSettings();
     if (rec.autoRecordOnLaunch) {
       window.setTimeout(() => {
-        void recorderStart(rec).catch(() => undefined);
+        if (activeGame === gameRun && !isLaunchAborted()) void recorderStart(rec).catch(console.warn);
       }, 8000);
     }
   } catch {
@@ -475,7 +501,7 @@ async function runLaunchPipeline(instanceId: string): Promise<void> {
 
   // Honor user preference: minimize the launcher window while the game runs.
   const closeOnLaunch = (await settingGet("closeOnLaunch")) === "true";
-  if (closeOnLaunch) {
+  if (closeOnLaunch && activeGame === gameRun) {
     try {
       const win = (await import("@tauri-apps/api/window")).getCurrentWindow();
       await win.minimize();

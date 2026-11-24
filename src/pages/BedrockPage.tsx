@@ -206,11 +206,7 @@ function Installed({
         transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
         className="relative overflow-hidden rounded-3xl border border-line shadow-floating"
       >
-        <div className="absolute inset-0 bg-gradient-to-br from-[#0b1a14] via-canvas-deep to-[#1a1208]" />
-        <div className="absolute inset-0 bg-gradient-to-r from-canvas-deep via-canvas-deep/80 to-transparent" />
-        <div className="pointer-events-none absolute -right-24 -top-24 h-72 w-72 rounded-full bg-emerald-500/15 blur-3xl" />
-        <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-gold-glow to-transparent" />
-
+        <div className="absolute inset-0 bg-canvas-card" />
         <div className="relative grid gap-8 p-7 sm:grid-cols-[1.05fr_1fr] sm:p-9">
           <div className="flex flex-col justify-between gap-6">
             <div>
@@ -271,20 +267,7 @@ function Installed({
             </div>
           </div>
 
-          <div className="relative hidden items-center justify-center sm:flex">
-            <div className="relative aspect-square w-full max-w-[260px]">
-              <div className="absolute inset-2 rounded-3xl border border-emerald-500/15 blur-[1px]" />
-              <div className="absolute inset-10 rounded-3xl border border-emerald-500/25" />
-              <div className="absolute inset-[24%] rounded-3xl border border-emerald-500/40 bg-gradient-to-br from-emerald-500/15 via-transparent to-transparent shadow-[0_0_60px_8px_rgba(20,184,120,0.20)]" />
-              <div className="absolute inset-0 flex items-center justify-center">
-                <IconBedrock
-                  width={92}
-                  height={92}
-                  className="text-emerald-300/90 drop-shadow-[0_8px_24px_rgba(20,184,120,0.45)]"
-                />
-              </div>
-            </div>
-          </div>
+          <img src="./art/grass.webp" alt="" className="hidden h-52 w-full object-cover rounded-lg sm:block" />
         </div>
       </motion.section>
 

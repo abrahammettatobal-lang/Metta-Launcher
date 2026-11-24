@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { open } from "@tauri-apps/plugin-dialog";
 import { motion } from "framer-motion";
@@ -69,22 +69,27 @@ export function CreateInstancePage() {
   const modpackImport = useModpackImport();
   const [loader, setLoader] = useState<LoaderType>("vanilla");
   const [lv, setLv] = useState("");
-  const [forgeList, setForgeList] = useState<string[]>([]);
-  const [neoList, setNeoList] = useState<string[]>([]);
-  const [fabList, setFabList] = useState<string[]>([]);
+  const [loaderVersions, setLoaderVersions] = useState<string[]>([]);
+  const [catalogError, setCatalogError] = useState("");
+  const [retry, setRetry] = useState(0);
+  const [saving, setSaving] = useState(false);
   const [customJar, setCustomJar] = useState("");
   const [ramMin, setRamMin] = useState(1024);
   const [ramMax, setRamMax] = useState(4096);
 
   useEffect(() => {
-    setCatalogLoading(true);
+    let live = true;
+    setCatalogError(""); setCatalogLoading(true);
     void fetchVersionCatalog()
       .then((c) => {
+        if (!live) return;
         setCatalog(c);
         setMc((prev) => prev || defaultVersionId(c));
       })
-      .finally(() => setCatalogLoading(false));
-  }, []);
+      .catch(e => { if (live) setCatalogError(String(e)); })
+      .finally(() => { if (live) setCatalogLoading(false); });
+    return () => { live = false; };
+  }, [retry]);
 
   // Apply user defaults from Settings.
   useEffect(() => {
@@ -101,30 +106,18 @@ export function CreateInstancePage() {
   }, []);
 
   useEffect(() => {
-    if (!mc) return;
-    if (loader === "forge")
-      void listForgeVersions(mc)
-        .then(setForgeList)
-        .catch(() => setForgeList([]));
-    if (loader === "neoforge")
-      void listNeoForgeVersions(mc)
-        .then(setNeoList)
-        .catch((e) => {
-          console.error("[neoforge] versions", e);
-          setNeoList([]);
-        });
-    if (loader === "fabric")
-      void fetchFabricLoaderVersionsForMc(mc)
-        .then(setFabList)
-        .catch(() => setFabList([]));
+    let live = true;
+    setLv(""); setLoaderVersions([]);
+    if (!mc || loader === "vanilla" || loader === "custom") return;
+    const fetchVersions = loader === "forge" ? listForgeVersions : loader === "neoforge" ? listNeoForgeVersions : fetchFabricLoaderVersionsForMc;
+    void fetchVersions(mc).then(versions => {
+      if (live) { setLoaderVersions(versions); setLv(versions[0] ?? ""); }
+    }).catch(() => { if (live) setLoaderVersions([]); });
+    return () => { live = false; };
   }, [mc, loader]);
 
-  const loaderVersions = useMemo(() => {
-    if (loader === "forge") return forgeList;
-    if (loader === "neoforge") return neoList;
-    if (loader === "fabric") return fabList;
-    return [];
-  }, [loader, forgeList, neoList, fabList]);
+  const valid = !!name.trim() && !!mc && ramMin > 0 && ramMax >= ramMin &&
+    (loader === "vanilla" || (loader === "custom" ? !!customJar.trim() : loaderVersions.includes(lv)));
 
   return (
     <div className="space-y-6">
@@ -141,6 +134,7 @@ export function CreateInstancePage() {
             value={name}
             onChange={(e) => setName(e.target.value)}
           />
+          {catalogError && <div className="feedback" role="alert">{catalogError} <button onClick={() => setRetry(n => n + 1)}>Reintentar</button></div>}
           <VersionSelector
             catalog={catalog}
             value={mc}
@@ -150,7 +144,7 @@ export function CreateInstancePage() {
 
           <div>
             <span className="field-label">Mod loader</span>
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+            <div className="grid grid-cols-2 gap-2 xl:grid-cols-3">
               {LOADERS.map((l) => (
                 <button
                   key={l.id}
@@ -239,7 +233,7 @@ export function CreateInstancePage() {
             min={1024}
             max={16384}
             step={512}
-            onChange={setRamMax}
+            onChange={v => { setRamMax(v); setRamMin(n => Math.min(n,v)); }}
           />
           <RamSlider
             label="RAM mínima"
@@ -311,27 +305,19 @@ export function CreateInstancePage() {
           type="button"
           whileTap={{ scale: 0.99 }}
           className="btn-gold mt-6 w-full !py-3.5 text-[14px]"
-          onClick={() =>
-            tap("Crear instancia", async () => {
+          disabled={!valid || saving}
+          onClick={() => {
+            if (!valid || saving) return;
+            setSaving(true);
+            void tap("Crear instancia", async () => {
               const id = crypto.randomUUID();
               const root = (await appPaths()).launcherRoot;
-              const loaderVersion =
-                loader === "vanilla" || loader === "custom"
-                  ? mc
-                  : lv || (loader === "fabric" ? fabList[0] ?? "" : "");
-              if (loader !== "vanilla" && loader !== "custom" && !loaderVersion) {
-                alert("Selecciona una versión del loader.");
-                return;
-              }
-              if (loader === "custom" && !customJar.trim()) {
-                alert("Indica la ruta del client.jar personalizado.");
-                return;
-              }
+              const loaderVersion = loader === "vanilla" || loader === "custom" ? mc : lv;
               // The launcher will fall back to globalJvmArgs at launch time;
               // we keep per-instance overrides empty by default.
               const row: InstanceRow = {
                 id,
-                name,
+                name: name.trim(),
                 minecraftVersion: mc,
                 loaderType: loader,
                 loaderVersion,
@@ -352,11 +338,11 @@ export function CreateInstancePage() {
               await instanceSave(prep);
               await logAppend("launcher", "info", `Instancia creada ${name}`, id);
               nav("/instances");
-            })
-          }
+            }).finally(() => setSaving(false));
+          }}
         >
           <IconCubes width={14} height={14} />
-          Crear instancia
+          {saving ? "Creando…" : "Crear instancia"}
         </motion.button>
       </Card>
     </div>
@@ -395,6 +381,7 @@ function RamSlider({
         />
         <input
           type="range"
+          aria-label={label}
           min={min}
           max={max}
           step={step}

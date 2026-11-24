@@ -168,5 +168,6 @@ fn write_f32le_as_s16le(stream: &mut std::net::TcpStream, bytes: &[u8]) -> Resul
 }
 
 pub fn tcp_input_url(port: u16) -> String {
-  format!("tcp://127.0.0.1:{port}")
+  // FFmpeg connects as TCP client to our WASAPI listener.
+  format!("tcp://127.0.0.1:{port}?tcp_nodelay=1")
 }

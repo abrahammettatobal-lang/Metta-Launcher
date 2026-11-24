@@ -49,7 +49,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastContext.Provider value={value}>
       {children}
-      <div className="pointer-events-none fixed bottom-5 right-5 z-[100] flex w-[min(100vw-2rem,380px)] flex-col gap-2">
+      <div aria-live="polite" className="pointer-events-none fixed bottom-5 right-5 z-[100] flex w-[min(100vw-2rem,380px)] flex-col gap-2">
         <AnimatePresence initial={false}>
           {items.map((t) => (
             <motion.div
@@ -59,7 +59,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
               exit={{ opacity: 0, y: 8, scale: 0.98 }}
               transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
               className={cx(
-                "pointer-events-auto overflow-hidden rounded-2xl border backdrop-blur-xl shadow-floating",
+                "pointer-events-auto overflow-hidden rounded-2xl border shadow-floating",
                 t.kind === "success" && "border-emerald-800/40 bg-emerald-950/85",
                 t.kind === "error" && "border-red-900/45 bg-red-950/88",
                 t.kind === "warning" && "border-amber-800/40 bg-amber-950/85",

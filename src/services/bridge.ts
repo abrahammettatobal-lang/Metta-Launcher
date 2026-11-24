@@ -89,6 +89,10 @@ export async function instanceSave(row: InstanceRow): Promise<void> {
   await invoke("instance_save", { row });
 }
 
+export async function instanceDuplicate(id: string): Promise<void> {
+  await invoke("instance_duplicate", { id });
+}
+
 export async function instanceDelete(id: string): Promise<void> {
   await invoke("instance_delete", { id });
 }

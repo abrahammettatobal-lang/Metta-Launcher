@@ -19,6 +19,8 @@ pub struct RecorderSettings {
   pub mic_device: Option<String>,
   pub game_audio_device: Option<String>,
   pub capture_mode: String,
+  #[serde(default)]
+  pub monitor_index: u32,
   pub record_cursor: bool,
   pub variable_frame_rate: bool,
   pub encoder_preference: String,
@@ -51,6 +53,7 @@ impl Default for RecorderSettings {
       mic_device: None,
       game_audio_device: None,
       capture_mode: "window".into(),
+      monitor_index: 0,
       record_cursor: true,
       variable_frame_rate: false,
       encoder_preference: "cpu".into(),

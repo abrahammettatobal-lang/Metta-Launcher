@@ -13,6 +13,7 @@ export interface RecorderSettings {
   micDevice: string | null;
   gameAudioDevice: string | null;
   captureMode: string;
+  monitorIndex: number;
   recordCursor: boolean;
   variableFrameRate: boolean;
   encoderPreference: string;
@@ -225,4 +226,87 @@ export function formatDuration(secs: number): string {
     return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
   }
   return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+}
+
+export type RecorderPresetId = "balanced" | "performance" | "quality" | "stream";
+
+export const RECORDER_PRESETS: Record<
+  RecorderPresetId,
+  {
+    label: string;
+    hint: string;
+    patch: Partial<RecorderSettings>;
+  }
+> = {
+  balanced: {
+    label: "Equilibrado",
+    hint: "30 FPS · 20 Mbps",
+    patch: {
+      fps: 30,
+      bitrateMbps: 20,
+      qualityPreset: "high",
+      resolution: "original",
+      encoderPreference: "auto",
+      format: "mp4",
+      codec: "h264",
+    },
+  },
+  performance: {
+    label: "Rendimiento",
+    hint: "Menos carga de PC",
+    patch: {
+      fps: 30,
+      bitrateMbps: 10,
+      qualityPreset: "medium",
+      resolution: "1920x1080",
+      encoderPreference: "auto",
+      format: "mp4",
+      codec: "h264",
+    },
+  },
+  quality: {
+    label: "Alta calidad",
+    hint: "60 FPS · 40 Mbps",
+    patch: {
+      fps: 60,
+      bitrateMbps: 40,
+      qualityPreset: "high",
+      resolution: "original",
+      encoderPreference: "auto",
+      format: "mkv",
+      codec: "h264",
+    },
+  },
+  stream: {
+    label: "Clips / Shorts",
+    hint: "1080p ligero",
+    patch: {
+      fps: 60,
+      bitrateMbps: 12,
+      qualityPreset: "medium",
+      resolution: "1920x1080",
+      encoderPreference: "auto",
+      format: "mp4",
+      codec: "h264",
+    },
+  },
+};
+
+export function normalizeHotkey(raw: string): string {
+  return raw.trim().toUpperCase().replace(/\s+/g, "");
+}
+
+export function eventMatchesHotkey(e: KeyboardEvent, hotkey: string): boolean {
+  const target = normalizeHotkey(hotkey);
+  if (!target) return false;
+  const parts = target.split("+").filter(Boolean);
+  const keyPart = parts[parts.length - 1] ?? "";
+  const needCtrl = parts.includes("CTRL") || parts.includes("CONTROL");
+  const needAlt = parts.includes("ALT");
+  const needShift = parts.includes("SHIFT");
+  if (!!e.ctrlKey !== needCtrl) return false;
+  if (!!e.altKey !== needAlt) return false;
+  if (!!e.shiftKey !== needShift) return false;
+  const pressed = e.key.length === 1 ? e.key.toUpperCase() : e.key.toUpperCase();
+  return pressed === keyPart;
 }

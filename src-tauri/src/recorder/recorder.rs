@@ -159,11 +159,25 @@ impl RecorderManager {
       let _ = app.emit(EVENT_STATUS, self.status_snapshot());
       thread::spawn(move || {
         for left in (1..=countdown).rev() {
+          let cancelled = mgr
+            .manager()
+            .map(|m| m.inner.lock().unwrap().phase != RecorderPhase::Countdown)
+            .unwrap_or(true);
+          if cancelled {
+            return;
+          }
           let _ = app_c.emit(
             EVENT_COUNTDOWN,
             RecorderCountdownPayload { seconds_left: left },
           );
           thread::sleep(Duration::from_secs(1));
+        }
+        let cancelled = mgr
+          .manager()
+          .map(|m| m.inner.lock().unwrap().phase != RecorderPhase::Countdown)
+          .unwrap_or(true);
+        if cancelled {
+          return;
         }
         if let Err(e) = mgr.spawn_recording(app_c.clone(), settings_c) {
           let _ = app_c.emit(
@@ -196,8 +210,16 @@ impl RecorderManager {
       }
     };
 
-    let game_pid = game::running_pid();
-    let capture = capture::resolve_capture_target(&settings.capture_mode, game_pid, 0)?;
+    let launcher_pid = game::running_pid();
+    let capture = capture::resolve_capture_target(
+      &settings.capture_mode,
+      launcher_pid,
+      settings.monitor_index,
+    )?;
+    // Prefer launcher PID; fall back to the Minecraft window PID for WASAPI loopback.
+    let game_pid = launcher_pid.or_else(|| {
+      capture::find_minecraft_window(None).pid
+    });
     let (out_w, out_h) = capture::scaled_resolution(&capture, &settings.resolution);
 
     let resolved = encoder::resolve_encoder(
@@ -210,7 +232,7 @@ impl RecorderManager {
       settings.variable_frame_rate,
     )?;
 
-    let (audio_args, has_audio) = {
+    let audio_plan = {
       let mut audio_plan = audio::plan_audio(
         &ffmpeg,
         &settings.audio_mode,
@@ -226,6 +248,8 @@ impl RecorderManager {
           let (handle, port) =
             crate::recorder::wasapi_loopback::LoopbackCapture::start(*process_id)?;
           *self.loopback.lock().unwrap() = Some(handle);
+          // Give the loopback listener a moment before FFmpeg connects.
+          thread::sleep(Duration::from_millis(80));
           audio_plan = audio::plan_audio(
             &ffmpeg,
             &settings.audio_mode,
@@ -237,8 +261,9 @@ impl RecorderManager {
         }
       }
 
-      (audio_plan.ffmpeg_args, audio_plan.has_audio)
+      audio_plan
     };
+    let has_audio = audio_plan.has_audio;
 
     let ext = encoder::output_extension(&settings.format);
     let filename = format!(
@@ -248,29 +273,36 @@ impl RecorderManager {
     );
     let output_path = PathBuf::from(&settings.output_dir).join(&filename);
 
-    let mut cmd = Command::new(&ffmpeg);
-    cmd.arg("-y");
-    cmd.args(["-hide_banner", "-loglevel", "info", "-stats"]);
-    cmd.args(capture::build_video_input_args(
+    // FFmpeg option order matters: ALL -i inputs first, then filters/maps, then codecs.
+    // Putting -vf between video and audio inputs caused:
+    // "Error opening input files: Invalid argument"
+    let video_input = capture::build_video_input_args(
       &capture,
       settings.fps,
       settings.record_cursor,
-    ));
-    if out_w != capture.width || out_h != capture.height {
-      cmd.args([
-        "-vf",
-        &format!("scale={out_w}:{out_h}:flags=lanczos,format=yuv420p"),
-      ]);
+    );
+    let vf = if out_w != capture.width || out_h != capture.height {
+      format!("scale={out_w}:{out_h}:flags=lanczos,format=yuv420p")
     } else {
-      cmd.args(["-vf", "format=yuv420p"]);
-    }
-    cmd.args(audio_args);
-    cmd.args(resolved.video_args);
+      "format=yuv420p".into()
+    };
+
+    let mut cmd = Command::new(&ffmpeg);
+    cmd.arg("-y");
+    cmd.args(["-hide_banner", "-loglevel", "info", "-stats"]);
+    cmd.args(&video_input);
+    cmd.args(&audio_plan.input_args);
+    cmd.args(["-vf", &vf]);
+    cmd.args(&audio_plan.map_args);
+    cmd.args(&resolved.video_args);
     cmd.args(encoder::build_output_args(&settings.format, has_audio));
     cmd.arg(&output_path);
     cmd.stdin(Stdio::piped());
     cmd.stdout(Stdio::null());
     cmd.stderr(Stdio::piped());
+
+    let cmdline_debug = format!("{:?}", cmd);
+    eprintln!("[metta-recorder] ffmpeg cmd: {cmdline_debug}");
 
     let mut child = match cmd.spawn() {
       Ok(child) => child,
@@ -378,6 +410,17 @@ impl RecorderManager {
     }
     if state.phase == RecorderPhase::Countdown {
       *state = RuntimeState::default();
+      drop(state);
+      let _ = app.emit(EVENT_STATUS, self.status_snapshot());
+      let _ = app.emit(
+        EVENT_STOPPED,
+        RecorderStoppedPayload {
+          file_path: String::new(),
+          duration_secs: 0,
+          file_size_bytes: 0,
+          success: true,
+        },
+      );
       return Ok(());
     }
 
@@ -386,6 +429,7 @@ impl RecorderManager {
     let elapsed = state.elapsed_secs();
     let pid = state.ffmpeg_pid.take();
     let stdin = state.ffmpeg_stdin.take();
+    let ffmpeg_path = state.ffmpeg_path.clone();
 
     if let Some(flag) = &state.stop_monitor {
       if let Ok(mut f) = flag.lock() {
@@ -406,6 +450,12 @@ impl RecorderManager {
     thread::sleep(Duration::from_millis(250));
     let file_size = file_size_or_zero(&output);
     let success = output.is_file() && file_size > 1024;
+    if success {
+      write_recording_meta(&output, elapsed, file_size);
+      if !ffmpeg_path.is_empty() {
+        generate_thumbnail(&ffmpeg_path, &output);
+      }
+    }
     let mut state = self.inner.lock().unwrap();
     *state = RuntimeState::default();
     drop(state);
@@ -456,7 +506,11 @@ impl RecorderManager {
     let ffmpeg = encoder::find_ffmpeg()?;
     ensure_output_dir(settings)?;
     let game_pid = game::running_pid();
-    let capture = capture::resolve_capture_target(&settings.capture_mode, game_pid, 0)?;
+    let capture = capture::resolve_capture_target(
+      &settings.capture_mode,
+      game_pid,
+      settings.monitor_index,
+    )?;
     let filename = format!("Minecraft_{}.png", Local::now().format("%Y-%m-%d_%H-%M-%S"));
     let path = PathBuf::from(&settings.output_dir).join(filename);
     capture::take_screenshot(&ffmpeg, &capture, &path)?;
@@ -634,7 +688,7 @@ fn parse_ffmpeg_stderr(
           EVENT_ERROR,
           RecorderErrorPayload {
             code: "ffmpeg".into(),
-            message: line,
+            message: humanize_ffmpeg_error(&line),
           },
         );
       }
@@ -646,10 +700,26 @@ fn is_fatal_ffmpeg_line(lower: &str) -> bool {
   lower.contains("conversion failed")
     || lower.contains("error opening output")
     || lower.contains("error opening input")
+    || lower.contains("invalid argument")
     || lower.contains("no such file or directory")
     || lower.contains("permission denied")
     || lower.contains("could not find")
     || lower.contains("failed to")
+}
+
+fn humanize_ffmpeg_error(raw: &str) -> String {
+  let lower = raw.to_lowercase();
+  if lower.contains("error opening input") || lower.contains("invalid argument") {
+    return format!(
+      "No se pudo abrir la captura ({raw}). Prueba modo Monitor, audio «Sin audio», o reinicia Minecraft."
+    );
+  }
+  if lower.contains("could not open encoder") || lower.contains("unknown encoder") {
+    return format!(
+      "Encoder no disponible ({raw}). Cambia a encoder CPU o pulsa Detectar FFmpeg."
+    );
+  }
+  raw.to_string()
 }
 
 fn parse_stat_value(line: &str, key: &str) -> Option<u64> {
@@ -731,18 +801,28 @@ fn kill_pid_tree(pid: u32) {
   }
 }
 
+fn generate_thumbnail(ffmpeg: &str, video: &Path) {
+  let thumb = video.with_extension("jpg");
+  if thumb.exists() {
+    return;
+  }
+  let _ = encoder::generate_thumbnail(ffmpeg, video, &thumb);
+}
+
+fn write_recording_meta(video: &Path, duration_secs: u64, size_bytes: u64) {
+  let meta_path = video.with_extension("meta.json");
+  let payload = serde_json::json!({
+    "durationSecs": duration_secs,
+    "sizeBytes": size_bytes,
+  });
+  if let Ok(raw) = serde_json::to_string_pretty(&payload) {
+    let _ = std::fs::write(meta_path, raw);
+  }
+}
+
 #[cfg(windows)]
 fn suspend_process(pid: u32) -> Result<(), String> {
-  let script = format!(
-    "(Get-Process -Id {pid} -ErrorAction SilentlyContinue | ForEach-Object {{ $_.Suspend() }})"
-  );
-  Command::new("powershell")
-    .args(["-NoProfile", "-Command", &script])
-    .status()
-    .map_err(|e| e.to_string())?
-    .success()
-    .then_some(())
-    .ok_or_else(|| "No se pudo pausar la grabación.".into())
+  set_process_threads_suspended(pid, true)
 }
 
 #[cfg(not(windows))]
@@ -752,19 +832,62 @@ fn suspend_process(_pid: u32) -> Result<(), String> {
 
 #[cfg(windows)]
 fn resume_process(pid: u32) -> Result<(), String> {
-  let script = format!(
-    "(Get-Process -Id {pid} -ErrorAction SilentlyContinue | ForEach-Object {{ $_.Resume() }})"
-  );
-  Command::new("powershell")
-    .args(["-NoProfile", "-Command", &script])
-    .status()
-    .map_err(|e| e.to_string())?
-    .success()
-    .then_some(())
-    .ok_or_else(|| "No se pudo reanudar la grabación.".into())
+  set_process_threads_suspended(pid, false)
 }
 
 #[cfg(not(windows))]
 fn resume_process(_pid: u32) -> Result<(), String> {
   Err("Reanudar grabación no está soportado en esta plataforma.".into())
+}
+
+#[cfg(windows)]
+fn set_process_threads_suspended(pid: u32, suspend: bool) -> Result<(), String> {
+  use windows::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
+  use windows::Win32::System::Diagnostics::ToolHelp::{
+    CreateToolhelp32Snapshot, Thread32First, Thread32Next, TH32CS_SNAPTHREAD, THREADENTRY32,
+  };
+  use windows::Win32::System::Threading::{
+    OpenThread, ResumeThread, SuspendThread, THREAD_SUSPEND_RESUME,
+  };
+
+  unsafe {
+    let snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0)
+      .map_err(|e| format!("No se pudo enumerar hilos: {e}"))?;
+    if snap == INVALID_HANDLE_VALUE {
+      return Err("Snapshot de hilos inválido.".into());
+    }
+
+    let mut entry = THREADENTRY32 {
+      dwSize: std::mem::size_of::<THREADENTRY32>() as u32,
+      ..Default::default()
+    };
+    let mut touched = 0u32;
+    if Thread32First(snap, &mut entry).is_ok() {
+      loop {
+        if entry.th32OwnerProcessID == pid {
+          if let Ok(thread) = OpenThread(THREAD_SUSPEND_RESUME, false, entry.th32ThreadID) {
+            if suspend {
+              let _ = SuspendThread(thread);
+            } else {
+              let _ = ResumeThread(thread);
+            }
+            let _ = CloseHandle(thread);
+            touched += 1;
+          }
+        }
+        if Thread32Next(snap, &mut entry).is_err() {
+          break;
+        }
+      }
+    }
+    let _ = CloseHandle(snap);
+    if touched == 0 {
+      return Err(if suspend {
+        "No se pudo pausar la grabación.".into()
+      } else {
+        "No se pudo reanudar la grabación.".into()
+      });
+    }
+  }
+  Ok(())
 }

@@ -91,6 +91,29 @@ const PATTERNS: ErrorPattern[] = [
     ],
   },
   {
+    regex:
+      /ResolutionException|LayerInstantiationException|Split package|export package .+ to module|_1\._\d+|mixin_synthetic|in both module/i,
+    title: "Conflicto de módulos Java (Forge/NeoForge)",
+    cause:
+      "BootstrapLauncher cargó el client.jar vanilla (1.21.1.jar → módulo _1._21._1) además del módulo minecraft de Forge/NeoForge. Los dos exportan el mismo paquete (p. ej. a mixin_synthetic).",
+    suggestions: [
+      "Actualiza Metta Launcher: 1.21.1.jar debe estar en ignoreList, no en el module path.",
+      "Cierra el launcher, vuelve a abrirlo y lanza de nuevo (no basta con reintentar si sigue en memoria la build anterior).",
+      "Si persiste, borra libraries/ del launcher y vuelve a lanzar para reinstalar Forge/NeoForge.",
+    ],
+  },
+  {
+    regex: /InvalidPathException.*classpath_separator|Illegal char <:>.*classpath_separator/i,
+    title: "Classpath de Forge mal formado",
+    cause:
+      "El launcher no sustituyó ${classpath_separator} en los argumentos JVM de Forge. " +
+      "Java intentó tratar todo el module path como una sola ruta inválida.",
+    suggestions: [
+      "Actualiza Metta Launcher a la última versión.",
+      "Si persiste, reinstala Forge desde la instancia o borra shared/forge_runs/ y vuelve a lanzar.",
+    ],
+  },
+  {
     regex: /ModLoadingException|fml\.common\.LoaderException|java\.lang\.NoClassDefFoundError.*forge/i,
     title: "Mod incompatible",
     cause: "Uno o más mods fallaron al cargar, probablemente incompatibles con esta versión.",
@@ -101,7 +124,7 @@ const PATTERNS: ErrorPattern[] = [
     ],
   },
   {
-    regex: /Could not find required mod|missing mod/i,
+    regex: /Could not find required mod|Missing or unsupported mandatory dependencies/i,
     title: "Dependencia de mod faltante",
     cause: "Un mod requiere otro mod que no está instalado.",
     suggestions: [

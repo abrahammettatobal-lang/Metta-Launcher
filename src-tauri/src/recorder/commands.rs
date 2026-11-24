@@ -260,6 +260,10 @@ pub fn recorder_delete_recording(path: String) -> Result<(), String> {
   if thumb.is_file() {
     let _ = std::fs::remove_file(thumb);
   }
+  let meta = p.with_extension("meta.json");
+  if meta.is_file() {
+    let _ = std::fs::remove_file(meta);
+  }
   Ok(())
 }
 
@@ -279,6 +283,16 @@ pub fn recorder_rename_recording(path: String, new_name: String) -> Result<Strin
     .unwrap_or("mp4");
   let dest = p.with_file_name(format!("{safe}.{ext}"));
   std::fs::rename(&p, &dest).map_err(|e| format!("No se pudo renombrar: {e}"))?;
+  let old_thumb = p.with_extension("jpg");
+  let new_thumb = dest.with_extension("jpg");
+  if old_thumb.is_file() {
+    let _ = std::fs::rename(&old_thumb, &new_thumb);
+  }
+  let old_meta = p.with_extension("meta.json");
+  let new_meta = dest.with_extension("meta.json");
+  if old_meta.is_file() {
+    let _ = std::fs::rename(&old_meta, &new_meta);
+  }
   Ok(dest.to_string_lossy().into_owned())
 }
 
@@ -310,6 +324,7 @@ pub fn list_recordings_in_dir(dir: &str) -> Result<Vec<RecordingItem>, String> {
       .unwrap_or("grabación")
       .to_string();
     let thumb = thumb_path(&path);
+    let meta_info = read_recording_meta(&path);
     items.push(RecordingItem {
       id: path.to_string_lossy().into_owned(),
       name,
@@ -320,7 +335,7 @@ pub fn list_recordings_in_dir(dir: &str) -> Result<Vec<RecordingItem>, String> {
         None
       },
       created_at: modified.to_rfc3339(),
-      duration_secs: None,
+      duration_secs: meta_info.as_ref().and_then(|m| m.duration_secs),
       width: None,
       height: None,
       size_bytes: meta.len(),
@@ -332,6 +347,18 @@ pub fn list_recordings_in_dir(dir: &str) -> Result<Vec<RecordingItem>, String> {
 
 fn thumb_path(video: &Path) -> PathBuf {
   video.with_extension("jpg")
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RecordingMetaFile {
+  duration_secs: Option<f64>,
+}
+
+fn read_recording_meta(video: &Path) -> Option<RecordingMetaFile> {
+  let meta = video.with_extension("meta.json");
+  let raw = std::fs::read_to_string(meta).ok()?;
+  serde_json::from_str(&raw).ok()
 }
 
 fn sanitize_filename(name: &str) -> String {

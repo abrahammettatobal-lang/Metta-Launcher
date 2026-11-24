@@ -47,6 +47,64 @@ pub fn write_instance_meta(db: &Db, row: &InstanceRow) -> Result<(), String> {
   fs::write(meta_path(&dir), json).map_err(|e| e.to_string())
 }
 
+/// Publish the new directory only after its worlds and metadata have been copied.
+pub fn duplicate_instance(db: &Db, id: &str) -> Result<(), String> {
+  let mut row = crate::db::instance_get(db, id)?.ok_or("Instancia no encontrada")?;
+  let root = launcher_root(db);
+  let source = dunce::canonicalize(instance_dir(&root, &row.instance_path)).map_err(|e| e.to_string())?;
+  let parent = dunce::canonicalize(root.join("instances")).map_err(|e| e.to_string())?;
+  if source.parent() != Some(parent.as_path()) {
+    return Err("La carpeta de origen debe estar dentro de instances.".into());
+  }
+  let new_id = Uuid::new_v4().to_string();
+  let staging = parent.join(format!(".copy-{new_id}"));
+  let dest = parent.join(&new_id);
+  fs::create_dir(&staging).map_err(|e| e.to_string())?;
+  let publish = (|| -> Result<(), String> {
+    copy_instance_contents(&source, &staging, true).map_err(|e| e.to_string())?;
+    let relative = format!("instances/{new_id}");
+    if let Some(jar) = &row.custom_client_jar {
+      let absolute = instance_dir(&root, jar);
+      if let Ok(suffix) = absolute.strip_prefix(&source) {
+        row.custom_client_jar = Some(Path::new(&relative).join(suffix).to_string_lossy().into_owned());
+      }
+    }
+    row.id = new_id;
+    row.instance_path = relative;
+    row.name = format!("{} (copia)", row.name);
+    row.last_played_at = None;
+    row.created_at = Utc::now().to_rfc3339();
+    row.updated_at = row.created_at.clone();
+    fs::write(meta_path(&staging), serde_json::to_vec_pretty(&row).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+    fs::rename(&staging, &dest).map_err(|e| e.to_string())
+  })();
+  if let Err(err) = publish {
+    let _ = fs::remove_dir_all(&staging);
+    return Err(err);
+  }
+  // Disk sync can recover a published copy if writing SQLite is interrupted.
+  crate::db::instance_upsert(db, &row)
+}
+
+fn copy_instance_contents(src: &Path, dest: &Path, top: bool) -> std::io::Result<()> {
+  for entry in fs::read_dir(src)? {
+    let entry = entry?;
+    let name = entry.file_name();
+    if top && matches!(name.to_str(), Some(META_FILE | ".launch-cache.json" | ".metta-java-args.txt")) { continue; }
+    let kind = entry.file_type()?;
+    let target = dest.join(name);
+    if kind.is_dir() {
+      fs::create_dir(&target)?;
+      copy_instance_contents(&entry.path(), &target, false)?;
+    } else if kind.is_file() {
+      fs::copy(entry.path(), target)?;
+    } else {
+      return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, format!("No se pudo copiar el enlace {:?}", entry.path())));
+    }
+  }
+  Ok(())
+}
+
 fn read_instance_meta(dir: &Path) -> Option<InstanceRow> {
   let raw = fs::read_to_string(meta_path(dir)).ok()?;
   serde_json::from_str(&raw).ok()
@@ -165,4 +223,38 @@ pub fn sync_instances_from_disk(db: &Db) -> Result<u32, String> {
   }
 
   Ok(imported)
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn duplicate_copies_worlds_and_rewrites_metadata() {
+    let root = std::env::temp_dir().join(format!("metta-copy-test-{}", Uuid::new_v4()));
+    fs::create_dir_all(&root).unwrap();
+    let db = Db::open(&root.join("test.db")).unwrap();
+    db.setting_set("launcherRoot", root.to_str().unwrap()).unwrap();
+    let id = Uuid::new_v4().to_string();
+    let rel = format!("instances/{id}");
+    let mut row = recovered_instance_row(&id, &rel);
+    row.name = "Supervivencia".into();
+    row.last_played_at = Some(Utc::now().to_rfc3339());
+    crate::db::instance_upsert(&db, &row).unwrap();
+    write_instance_meta(&db, &row).unwrap();
+    let src = root.join(&rel);
+    fs::create_dir_all(src.join("saves/mundo")).unwrap();
+    fs::write(src.join("saves/mundo/level.dat"), b"world").unwrap();
+    fs::write(src.join(".metta-java-args.txt"), b"session").unwrap();
+    duplicate_instance(&db, &id).unwrap();
+    let copy = crate::db::instances_list(&db).unwrap().into_iter().find(|r| r.id != id).unwrap();
+    let dest = root.join(&copy.instance_path);
+    assert_eq!(fs::read(dest.join("saves/mundo/level.dat")).unwrap(), b"world");
+    assert_eq!(read_instance_meta(&dest).unwrap().id, copy.id);
+    assert_eq!(copy.name, "Supervivencia (copia)");
+    assert!(copy.last_played_at.is_none());
+    assert!(!dest.join(".metta-java-args.txt").exists());
+    drop(db);
+    fs::remove_dir_all(root).unwrap();
+  }
 }

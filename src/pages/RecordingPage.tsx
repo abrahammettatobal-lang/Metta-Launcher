@@ -1,4 +1,6 @@
 import { memo, useCallback, useEffect, useRef, useState } from "react";
+import { open } from "@tauri-apps/plugin-dialog";
+import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { Topbar } from "../ui/Topbar";
 import { Card } from "../ui/Card";
 import { RecorderPanel } from "../components/recorder/RecorderPanel";
@@ -7,8 +9,10 @@ import { RecorderStatusPanel } from "../components/recorder/RecorderStatus";
 import { RecordingsGallery } from "../components/recorder/RecordingsGallery";
 import { RecorderOverlay } from "../components/recorder/RecorderOverlay";
 import {
+  eventMatchesHotkey,
   recorderFindMinecraftWindow,
   recorderFfmpegStatus,
+  recorderGetGameStatus,
   recorderGetSettings,
   recorderGetStatus,
   recorderInstallFfmpeg,
@@ -41,7 +45,10 @@ import {
   recordingsList,
   type RecordingItem,
 } from "../services/recorder/recordingsService";
-import { subscribeDownloadProgress } from "../services/downloads/downloadEvents";
+import {
+  onNativeEvent,
+  subscribeDownloadProgress,
+} from "../services/downloads/downloadEvents";
 import { tap } from "../utils/tap";
 import { toastGlobal } from "../ui/Toast";
 
@@ -83,6 +90,13 @@ function formatInstallProgress(p: InstallProgressState): number | null {
   return null;
 }
 
+function ensureMonitorIndex(s: RecorderSettings): RecorderSettings {
+  return {
+    ...s,
+    monitorIndex: Number.isFinite(s.monitorIndex) ? s.monitorIndex : 0,
+  };
+}
+
 export function RecordingPage() {
   const [settings, setSettings] = useState<RecorderSettings | null>(null);
   const [status, setStatus] = useState<RecorderStatus>(idleStatus);
@@ -102,18 +116,23 @@ export function RecordingPage() {
   const [probing, setProbing] = useState(false);
   const [probeError, setProbeError] = useState<string | null>(null);
   const [countdown, setCountdown] = useState<number | null>(null);
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const [mcFound, setMcFound] = useState(false);
+  const [gameRunning, setGameRunning] = useState(false);
   const [saved, setSaved] = useState(false);
   const [galleryLoaded, setGalleryLoaded] = useState(false);
 
   const settingsRef = useRef<RecorderSettings | null>(null);
   const statusRef = useRef(status);
   const saveTimer = useRef<number | null>(null);
+  const busyRef = useRef(false);
 
   statusRef.current = status;
+  busyRef.current = busy;
 
   useEffect(() => {
     let cancelled = false;
+    setProbeError(null);
     void (async () => {
       const [s, st, mon, ff] = await Promise.all([
         recorderGetSettings(),
@@ -122,39 +141,47 @@ export function RecordingPage() {
         recorderFfmpegStatus(),
       ]);
       if (cancelled) return;
-      setSettings(s);
-      settingsRef.current = s;
+      const next = ensureMonitorIndex(s);
+      setSettings(next);
+      settingsRef.current = next;
       setStatus(st);
       setMonitors(mon);
       setFfmpegInstalled(ff.installed);
       setGameAudioAvailable(ff.audioCapable);
-    })();
+    })().catch((e) => {
+      if (!cancelled) setProbeError(String(e));
+    });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [loadAttempt]);
 
   useEffect(() => {
     const unsubs: Array<() => void> = [];
     let mounted = true;
 
-    void (async () => {
-      unsubs.push(
-        await subscribeRecorderStatus((next) => {
+    unsubs.push(
+      onNativeEvent(
+        subscribeRecorderStatus((next) => {
           if (!mounted) return;
-          if (next.phase === "idle" && statusRef.current.phase === "idle") return;
+          if (next.phase === "idle" && statusRef.current.phase === "idle")
+            return;
           setStatus(next);
         }),
-      );
-      unsubs.push(
-        await subscribeRecorderCountdown((p) => {
+      ),
+    );
+    unsubs.push(
+      onNativeEvent(
+        subscribeRecorderCountdown((p) => {
           if (!mounted) return;
           setCountdown(p.secondsLeft);
           setStatus((prev) => ({ ...prev, phase: "countdown" }));
         }),
-      );
-      unsubs.push(
-        await subscribeRecorderStarted((payload) => {
+      ),
+    );
+    unsubs.push(
+      onNativeEvent(
+        subscribeRecorderStarted((payload) => {
           if (!mounted) return;
           setCountdown(null);
           setStatus((prev) => ({
@@ -166,29 +193,41 @@ export function RecordingPage() {
           }));
           toastGlobal("success", "Grabación iniciada");
         }),
-      );
-      unsubs.push(
-        await subscribeRecorderStopped((p) => {
+      ),
+    );
+    unsubs.push(
+      onNativeEvent(
+        subscribeRecorderStopped((p) => {
           if (!mounted) return;
           setCountdown(null);
           setStatus(idleStatus);
-          toastGlobal(
-            p.success ? "success" : "error",
-            p.success ? "Grabación guardada" : "La grabación terminó con errores",
-          );
+          if (!p.filePath) {
+            toastGlobal("info", "Grabación cancelada");
+          } else {
+            toastGlobal(
+              p.success ? "success" : "error",
+              p.success
+                ? "Grabación guardada"
+                : "La grabación terminó con errores",
+            );
+          }
           setGalleryLoaded(false);
         }),
-      );
-      unsubs.push(
-        await subscribeRecorderError((p) => {
+      ),
+    );
+    unsubs.push(
+      onNativeEvent(
+        subscribeRecorderError((p) => {
           if (!mounted) return;
           toastGlobal("error", p.message);
           setCountdown(null);
           setStatus(idleStatus);
         }),
-      );
-      unsubs.push(
-        await subscribeFfmpegInstall((p) => {
+      ),
+    );
+    unsubs.push(
+      onNativeEvent(
+        subscribeFfmpegInstall((p) => {
           if (!mounted) return;
           setInstallMessage(p.message);
           if (p.phase === "extracting") {
@@ -225,9 +264,11 @@ export function RecordingPage() {
             );
           }
         }),
-      );
-      unsubs.push(
-        await subscribeDownloadProgress((p) => {
+      ),
+    );
+    unsubs.push(
+      onNativeEvent(
+        subscribeDownloadProgress((p) => {
           if (!mounted || p.id !== "ffmpeg-install") return;
           setInstallProgress({
             received: p.received,
@@ -244,8 +285,8 @@ export function RecordingPage() {
             setInstallMessage(null);
           }
         }),
-      );
-    })();
+      ),
+    );
 
     return () => {
       mounted = false;
@@ -308,8 +349,16 @@ export function RecordingPage() {
   }, [probeHardware]);
 
   const refreshMinecraft = useCallback(async () => {
-    const mc = await recorderFindMinecraftWindow();
-    setMcFound(mc.found);
+    try {
+      const [mc, game] = await Promise.all([
+        recorderFindMinecraftWindow(),
+        recorderGetGameStatus(),
+      ]);
+      setMcFound(mc.found);
+      setGameRunning(game.running);
+    } catch {
+      /* ignore polling errors */
+    }
   }, []);
 
   const loadGallery = useCallback(async () => {
@@ -322,14 +371,30 @@ export function RecordingPage() {
     }
   }, []);
 
+  useEffect(() => {
+    void refreshMinecraft();
+    const id = window.setInterval(() => void refreshMinecraft(), 4000);
+    return () => window.clearInterval(id);
+  }, [refreshMinecraft]);
+
+  useEffect(() => {
+    if (!galleryLoaded) void loadGallery();
+  }, [galleryLoaded, loadGallery]);
+
   const toggleRecording = useCallback(async () => {
     const s = settingsRef.current;
     if (!s) return;
     const phase = statusRef.current.phase;
     setBusy(true);
     try {
-      if (phase === "recording" || phase === "paused" || phase === "countdown") {
+      if (
+        phase === "recording" ||
+        phase === "paused" ||
+        phase === "countdown"
+      ) {
         await recorderStop();
+        setCountdown(null);
+        setStatus(idleStatus);
         return;
       }
       await refreshMinecraft();
@@ -361,22 +426,78 @@ export function RecordingPage() {
     });
   }, [refreshMinecraft]);
 
-  const queueSaveSettings = useCallback((next: RecorderSettings) => {
+  const openOutputFolder = useCallback(async () => {
+    const s = settingsRef.current;
+    if (!s?.outputDir) return;
+    await tap("Carpeta", () => revealItemInDir(s.outputDir));
+  }, []);
+
+  const pickOutputFolder = useCallback(async () => {
+    const picked = await open({ directory: true, multiple: false });
+    if (!picked || Array.isArray(picked)) return;
+    const current = settingsRef.current;
+    if (!current) return;
+    const next = { ...current, outputDir: picked };
     setSettings(next);
     settingsRef.current = next;
+    await recorderSaveSettings(next);
+    setSaved(true);
+    window.setTimeout(() => setSaved(false), 1500);
+    toastGlobal("success", "Carpeta de grabación actualizada");
+  }, []);
+
+  const queueSaveSettings = useCallback((next: RecorderSettings) => {
+    const normalized = ensureMonitorIndex(next);
+    setSettings(normalized);
+    settingsRef.current = normalized;
     if (saveTimer.current) window.clearTimeout(saveTimer.current);
     saveTimer.current = window.setTimeout(() => {
-      void recorderSaveSettings(next).then(() => {
+      void recorderSaveSettings(normalized).then(() => {
         setSaved(true);
         window.setTimeout(() => setSaved(false), 1500);
       });
     }, 600);
   }, []);
 
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const s = settingsRef.current;
+      if (!s || busyRef.current) return;
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+
+      if (eventMatchesHotkey(e, s.hotkeyToggle)) {
+        e.preventDefault();
+        void toggleRecording();
+        return;
+      }
+      if (eventMatchesHotkey(e, s.hotkeyPause)) {
+        e.preventDefault();
+        void togglePause();
+        return;
+      }
+      if (eventMatchesHotkey(e, s.hotkeyScreenshot)) {
+        e.preventDefault();
+        void takeScreenshot();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [toggleRecording, togglePause, takeScreenshot]);
+
   if (!settings) {
     return (
       <Card padding="tight">
-        <p className="text-[13px] text-ink-muted">Cargando grabador…</p>
+        {probeError ? (
+          <div className="feedback" role="alert">
+            {probeError}
+            <button onClick={() => setLoadAttempt((n) => n + 1)}>
+              Reintentar
+            </button>
+          </div>
+        ) : (
+          <p className="text-[13px] text-ink-muted">Cargando grabador…</p>
+        )}
       </Card>
     );
   }
@@ -393,7 +514,7 @@ export function RecordingPage() {
       ? "Extrayendo FFmpeg…"
       : installProgress?.state === "completed"
         ? "Instalación completada"
-        : installMessage ?? "Descargando FFmpeg…";
+        : (installMessage ?? "Descargando FFmpeg…");
 
   const needsFfmpegForAudio =
     settings.audioMode !== "none" && !gameAudioAvailable;
@@ -403,11 +524,20 @@ export function RecordingPage() {
       <Topbar
         eyebrow="Multimedia"
         title="Grabación"
-        subtitle="Graba Minecraft sin OBS. Detecta FFmpeg solo cuando lo necesites."
+        subtitle="Graba Minecraft sin OBS: captura de ventana o monitor, audio del juego y atajos rápidos."
         actions={
-          saved ? (
-            <span className="text-[11px] text-emerald-300">Guardado</span>
-          ) : undefined
+          <div className="flex items-center gap-2">
+            {saved && (
+              <span className="text-[11px] text-emerald-300">Guardado</span>
+            )}
+            <button
+              type="button"
+              className="btn"
+              onClick={() => void openOutputFolder()}
+            >
+              Carpeta de videos
+            </button>
+          </div>
         }
       />
 
@@ -417,21 +547,26 @@ export function RecordingPage() {
         countdown={countdown}
         busy={busy}
         mcFound={mcFound}
+        gameRunning={gameRunning}
+        ffmpegReady={ffmpegInstalled}
         onStart={() => void toggleRecording()}
         onStop={() => void toggleRecording()}
         onPause={() => void togglePause()}
         onResume={() => void togglePause()}
         onScreenshot={() => void takeScreenshot()}
+        onOpenFolder={() => void openOutputFolder()}
+        onRefreshTarget={() => void refreshMinecraft()}
       />
 
       {recordingActive && (
-        <Card title="Estado en vivo">
+        <Card title="Estado en vivo" eyebrow="Telemetría">
           <MemoStatus status={status} countdown={countdown} />
         </Card>
       )}
 
       <Card
-        title="Hardware y audio"
+        title="Hardware y ajustes"
+        eyebrow="Configuración"
         action={
           <div className="flex flex-wrap items-center gap-2">
             {(!ffmpegInstalled || needsFfmpegForAudio) && (
@@ -502,8 +637,7 @@ export function RecordingPage() {
           <p className="mb-3 text-[12px] text-ink-muted">
             Si no tienes FFmpeg, pulsa «Instalar FFmpeg» para descargarlo
             automáticamente (~100 MB). El audio del juego se captura con WASAPI
-            integrado en el launcher; FFmpeg solo se usa para vídeo y codificación.
-            También funciona si lo instalaste con winget u otro método.
+            integrado; FFmpeg se usa para vídeo y codificación.
           </p>
         )}
         {probeError && (
@@ -522,11 +656,13 @@ export function RecordingPage() {
           audioDevices={audioDevices}
           monitors={monitors}
           onChange={queueSaveSettings}
+          onPickFolder={() => void pickOutputFolder()}
         />
       </Card>
 
       <Card
         title="Mis grabaciones"
+        eyebrow="Biblioteca"
         action={
           <button
             type="button"
@@ -534,39 +670,33 @@ export function RecordingPage() {
             disabled={loadingGallery}
             onClick={() => void loadGallery()}
           >
-            {galleryLoaded ? "Recargar" : "Cargar lista"}
+            {loadingGallery ? "Cargando…" : "Recargar"}
           </button>
         }
       >
-        {!galleryLoaded && !loadingGallery ? (
-          <p className="text-[12px] text-ink-muted">
-            Pulsa «Cargar lista» para ver tus videos guardados.
-          </p>
-        ) : (
-          <RecordingsGallery
-            items={recordings}
-            loading={loadingGallery}
-            onOpen={(p) => void tap("Abrir", () => recordingOpen(p))}
-            onReveal={(p) => void tap("Carpeta", () => recordingReveal(p))}
-            onRename={(p, n) =>
-              void tap("Renombrar", async () => {
-                await recordingRename(p, n);
-                await loadGallery();
-              })
-            }
-            onDelete={(p) =>
-              void tap("Eliminar", async () => {
-                await recordingDelete(p);
-                await loadGallery();
-              })
-            }
-            onShare={(p) =>
-              void tap("Ruta copiada", async () => {
-                await recordingSharePath(p);
-              })
-            }
-          />
-        )}
+        <RecordingsGallery
+          items={recordings}
+          loading={loadingGallery && !galleryLoaded}
+          onOpen={(p) => void tap("Abrir", () => recordingOpen(p))}
+          onReveal={(p) => void tap("Carpeta", () => recordingReveal(p))}
+          onRename={(p, n) =>
+            void tap("Renombrar", async () => {
+              await recordingRename(p, n);
+              await loadGallery();
+            })
+          }
+          onDelete={(p) =>
+            void tap("Eliminar", async () => {
+              await recordingDelete(p);
+              await loadGallery();
+            })
+          }
+          onShare={(p) =>
+            void tap("Ruta copiada", async () => {
+              await recordingSharePath(p);
+            })
+          }
+        />
       </Card>
 
       {recordingActive && (

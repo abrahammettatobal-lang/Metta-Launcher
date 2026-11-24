@@ -2,7 +2,7 @@
 <html lang="es">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="./vite.svg" />
+    <link rel="icon" type="image/png" href="./metta-logo.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Metta Launcher</title>
     <style>
@@ -10,8 +10,8 @@
       body {
         margin: 0;
         height: 100%;
-        background: #080807;
-        color: #f4eadc;
+        background: #111316;
+        color: #f3f4f5;
         font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
       }
       #boot-fallback {
@@ -26,16 +26,9 @@
         gap: 12px;
         text-align: center;
         padding: 24px;
-        background: #080807;
+        background: #111316;
       }
-      #boot-fallback .dot {
-        width: 28px;
-        height: 28px;
-        border-radius: 10px;
-        border: 1px solid rgba(201, 162, 39, 0.35);
-        background: rgba(201, 162, 39, 0.12);
-        animation: pulse 1.2s ease-in-out infinite;
-      }
+      #boot-fallback img { width: 72px; height: 72px; border-radius: 5px; }
       #boot-error {
         display: none;
         max-width: 520px;
@@ -57,7 +50,7 @@
   <body class="dark min-h-full antialiased">
     <div id="root"></div>
     <div id="boot-fallback">
-      <div class="dot" aria-hidden="true"></div>
+      <img src="./metta-logo.png" alt="" />
       <div>Cargando Metta Launcher…</div>
       <div id="boot-error"></div>
     </div>

@@ -94,6 +94,7 @@ export function SettingsPage() {
 
   async function saveAll() {
     try {
+      if (!Number.isInteger(Number(gmin)) || !Number.isInteger(Number(gmax)) || Number(gmin) < 256 || Number(gmax) < Math.max(512,Number(gmin))) throw new Error("Comprueba el intervalo de RAM.");
       await settingSet("globalMinRamMb", String(Math.max(256, Number(gmin) || 1024)));
       await settingSet("globalMaxRamMb", String(Math.max(512, Number(gmax) || 4096)));
       await settingSet("globalJvmArgs", jvm);
@@ -104,10 +105,11 @@ export function SettingsPage() {
       await settingSet("microsoftClientId", msClientId.trim());
       await settingSet("curseforgeApiKey", curseforgeKey.trim());
       await logAppend("launcher", "info", "Ajustes guardados");
+      window.dispatchEvent(new Event("metta-settings-changed"));
       setSaved("ok");
       setTimeout(() => setSaved(null), 2200);
     } catch (e) {
-      console.error(e);
+      window.dispatchEvent(new CustomEvent("metta-toast", { detail: {kind:"error",title:"No se pudieron guardar los ajustes",message:String(e)} }));
       setSaved("err");
       setTimeout(() => setSaved(null), 3200);
     }
@@ -323,9 +325,7 @@ export function SettingsPage() {
 
           <Card eyebrow="Acerca de" title="Metta Launcher">
             <p className="text-[12px] leading-relaxed text-ink-muted">
-              Las builds oficiales se actualizan solas, como Discord o Spotify:
-              descarga el parche, lo aplica sobre la instalación existente y
-              reinicia. Tus instancias, mods y ajustes se conservan.
+              Comprueba la versión instalada y las actualizaciones disponibles.
             </p>
             <div className="mt-4 grid grid-cols-2 gap-3">
               <Info label="Versión" value={version} />
@@ -357,6 +357,8 @@ export function SettingsPage() {
                 onClick={() =>
                   tap("Comprobar actualizaciones", async () => {
                     setCheckingUpdate(true);
+                    setUpdateStatus(null);
+                    setPendingUpdate(null);
                     try {
                       const status = await checkAppUpdate();
                       setUpdateStatus(status);

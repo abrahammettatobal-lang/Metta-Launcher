@@ -328,15 +328,17 @@ pub fn scaled_resolution(
   target: &CaptureTarget,
   resolution: &str,
 ) -> (u32, u32) {
+  // yuv420p / most encoders require even dimensions.
+  let even = |v: u32| v.max(2) & !1u32;
   if resolution == "original" {
-    return (target.width.max(1), target.height.max(1));
+    return (even(target.width), even(target.height));
   }
   if let Some((w, h)) = resolution.split_once('x') {
     if let (Ok(w), Ok(h)) = (w.parse::<u32>(), h.parse::<u32>()) {
-      return (w.max(1), h.max(1));
+      return (even(w), even(h));
     }
   }
-  (target.width.max(1), target.height.max(1))
+  (even(target.width), even(target.height))
 }
 
 pub fn build_video_input_args(target: &CaptureTarget, fps: u32, record_cursor: bool) -> Vec<String> {
@@ -367,6 +369,24 @@ fn windows_video_input(target: &CaptureTarget, fps: u32, record_cursor: bool) ->
     if record_cursor { "1" } else { "0" }.into(),
   ];
 
+  // Prefer region capture: title= breaks often with Unicode / special chars
+  // and causes FFmpeg "Error opening input files: Invalid argument".
+  if target.width >= 320 && target.height >= 240 {
+    let w = target.width & !1;
+    let h = target.height & !1;
+    args.extend([
+      "-offset_x".into(),
+      target.offset_x.to_string(),
+      "-offset_y".into(),
+      target.offset_y.to_string(),
+      "-video_size".into(),
+      format!("{w}x{h}"),
+      "-i".into(),
+      "desktop".into(),
+    ]);
+    return args;
+  }
+
   if target.mode == "window" {
     if let Some(title) = &target.title {
       if !title.is_empty() {
@@ -375,20 +395,6 @@ fn windows_video_input(target: &CaptureTarget, fps: u32, record_cursor: bool) ->
         return args;
       }
     }
-  }
-
-  if target.mode == "monitor" && target.width > 0 && target.height > 0 {
-    args.extend([
-      "-offset_x".into(),
-      target.offset_x.to_string(),
-      "-offset_y".into(),
-      target.offset_y.to_string(),
-      "-video_size".into(),
-      format!("{}x{}", target.width, target.height),
-      "-i".into(),
-      "desktop".into(),
-    ]);
-    return args;
   }
 
   args.extend(["-i".into(), "desktop".into()]);

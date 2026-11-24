@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { logsClear, logsQuery } from "../services/bridge";
 import {
+  onNativeEvent,
   subscribeGameLog,
   subscribeGameExit,
   type GameLogLine,
@@ -112,8 +113,7 @@ export function LogsPage() {
 
   // Subscribe to live game-log events
   useEffect(() => {
-    let unlisten: (() => void) | undefined;
-    void subscribeGameLog((l: GameLogLine) => {
+    return onNativeEvent(subscribeGameLog((l: GameLogLine) => {
       if (pausedRef.current) return;
       const level = classifyGameLine(l.line, l.stream);
       const entry: LogEntry = {
@@ -129,16 +129,12 @@ export function LogsPage() {
       recentLinesRef.current = [...recentLinesRef.current.slice(-199), l.line];
       liveBufferRef.current = [...liveBufferRef.current.slice(-(MAX_LINES - 1)), entry];
       setLiveEntries([...liveBufferRef.current]);
-    }).then((fn) => {
-      unlisten = fn;
-    });
-    return () => unlisten?.();
+    }));
   }, []);
 
   // Subscribe to game-exit for crash diagnosis
   useEffect(() => {
-    let unlisten: (() => void) | undefined;
-    void subscribeGameExit((e: GameExit) => {
+    return onNativeEvent(subscribeGameExit((e: GameExit) => {
       if (!e.success) {
         const lines = [...recentLinesRef.current, ...(e.logTail ?? e.stderrTail ?? [])];
         const d = diagnoseLaunchFailure(lines, e.code);
@@ -149,10 +145,7 @@ export function LogsPage() {
       } else {
         setDiagnosis(null);
       }
-    }).then((fn) => {
-      unlisten = fn;
-    });
-    return () => unlisten?.();
+    }));
   }, []);
 
   // Subscribe to launch phase events for the stage pill
@@ -496,7 +489,7 @@ function DiagnosisPanel({
   onClose: () => void;
 }) {
   return (
-    <div className="relative overflow-hidden rounded-2xl border border-red-900/50 bg-red-950/25 p-5 backdrop-blur-sm">
+    <div className="relative overflow-hidden rounded-2xl border border-red-900/50 bg-red-950/25 p-5">
       <button
         type="button"
         onClick={onClose}

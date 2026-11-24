@@ -18,23 +18,29 @@ import { tap, toastOk } from "../utils/tap";
 export function EditInstancePage() {
   const { id } = useParams<{ id: string }>();
   const nav = useNavigate();
+  const [loaded, setLoaded] = useState(false);
   const [row, setRow] = useState<InstanceRow | null>(null);
   const [javas, setJavas] = useState<Array<{ path: string; version: string | null }>>([]);
   const [recJava, setRecJava] = useState<number | null>(null);
 
   useEffect(() => {
     if (!id) return;
-    void (async () => {
+    let live = true;
+    setLoaded(false);
+    void tap("Leer instancia", async () => {
       const r = await instanceGet(id);
+      if (!live) return;
       setRow(r);
       if (r) {
         setRecJava(await recommendedJava(r.minecraftVersion));
       }
-    })();
-    void javaDetect().then(setJavas);
+    }).finally(() => { if (live) setLoaded(true); });
+    void javaDetect().then(j => { if (live) setJavas(j); }).catch(console.warn);
+    return () => { live = false; };
   }, [id]);
 
-  if (!row) {
+  if (loaded && !row) return <div className="space-y-4"><h1 className="page-title">Instancia no disponible</h1><button className="btn" onClick={() => nav("/instances")}>Volver a mi biblioteca</button></div>;
+  if (!loaded || !row) {
     return (
       <div className="py-20 text-center text-ink-muted">Cargando instancia…</div>
     );
@@ -42,8 +48,11 @@ export function EditInstancePage() {
 
   const save = () =>
     tap("Guardar instancia", async () => {
+      if (!row.name.trim()) throw new Error("Escribe el nombre de la instancia.");
+      if (!Number.isInteger(row.minRamMb) || !Number.isInteger(row.maxRamMb) || row.minRamMb < 1 || row.maxRamMb < row.minRamMb) throw new Error("Comprueba el mínimo y el máximo de RAM.");
       await instanceSave({
         ...row,
+        name: row.name.trim(),
         updatedAt: new Date().toISOString(),
       });
       toastOk("Instancia guardada", row.name);

@@ -102,7 +102,13 @@ pub fn ensure_path_under_root(root: &Path, candidate: &Path) -> Result<PathBuf, 
   Ok(candidate.to_path_buf())
 }
 
+/// Optional profile root for a second installation or a removable drive.
+pub fn profile_dir() -> Option<PathBuf> {
+  std::env::var_os("METTA_PROFILE_DIR").map(PathBuf::from).filter(|p| p.is_absolute())
+}
+
 pub fn default_launcher_root() -> PathBuf {
+  if let Some(dir) = profile_dir() { return dir.join("game"); }
   dirs::data_dir()
     .or_else(dirs::home_dir)
     .unwrap_or_else(|| PathBuf::from("."))

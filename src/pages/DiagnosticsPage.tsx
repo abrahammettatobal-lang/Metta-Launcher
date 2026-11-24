@@ -29,14 +29,11 @@ export function DiagnosticsPage() {
   const load = useCallback(async () => {
     setBusy(true);
     try {
-      const [d, n, u] = await Promise.all([
-        systemDiagnose(),
-        networkCheck(),
-        launcherCheckUpdate(),
+      await Promise.all([
+        tap("Leer sistema", async () => setDiag(await systemDiagnose())),
+        tap("Comprobar red", async () => setNet(await networkCheck())),
+        tap("Comprobar actualización", async () => setUpdate(await launcherCheckUpdate())),
       ]);
-      setDiag(d);
-      setNet(n);
-      setUpdate(u);
     } finally {
       setBusy(false);
     }

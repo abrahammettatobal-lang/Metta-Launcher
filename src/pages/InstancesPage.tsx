@@ -3,14 +3,12 @@ import { useCallback, useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import {
-  appPaths,
   backupsList,
   dirDiskUsage,
   instanceBackup,
   instanceDelete,
-  instanceGet,
+  instanceDuplicate,
   instanceRestoreBackup,
-  instanceSave,
   instancesList,
   instancesSync,
   type BackupListItem,
@@ -42,6 +40,11 @@ export function InstancesPage() {
   const [sizes, setSizes] = useState<Record<string, number>>({});
   const [backups, setBackups] = useState<BackupListItem[]>([]);
   const nav = useNavigate();
+  const [query,setQuery] = useState("");
+  const [loader,setLoader] = useState("");
+  const [loadError,setLoadError] = useState("");
+  const [loading,setLoading] = useState(true);
+  const visible = rows.filter(row => (!loader || row.loaderType === loader) && (row.name + " " + row.minecraftVersion).toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
 
   const reload = useCallback(async () => {
     await instancesSync();
@@ -64,7 +67,7 @@ export function InstancesPage() {
   }, []);
 
   useEffect(() => {
-    void reload();
+    void reload().catch(e => setLoadError(String(e))).finally(() => setLoading(false));
   }, [reload]);
 
   return (
@@ -72,7 +75,7 @@ export function InstancesPage() {
       <Topbar
         eyebrow="Biblioteca"
         title="Instancias"
-        subtitle="Gestiona, duplica o elimina los mundos que has configurado."
+        subtitle="Tus versiones de Minecraft, sus mods y sus mundos guardados."
         actions={
           <>
             <button
@@ -120,7 +123,14 @@ export function InstancesPage() {
         />
       )}
 
-      {rows.length === 0 ? (
+      {rows.length > 0 && <div className="library-filters">
+        <input aria-label="Buscar instancias" placeholder="Buscar por nombre o versión…" className="field" value={query} onChange={e => setQuery(e.target.value)}/>
+        <select aria-label="Filtrar por loader" className="field" value={loader} onChange={e => setLoader(e.target.value)}>
+          <option value="">Todos los loaders</option>
+          {[...new Set(rows.map(r => r.loaderType))].sort().map(l => <option key={l} value={l}>{loaderLabel(l)}</option>)}
+        </select><span>{visible.length} / {rows.length}</span>
+      </div>}
+      {loading ? <p role="status">Cargando biblioteca…</p> : loadError ? <div role="alert" className="feedback">{loadError}<button onClick={() => void tap("Recargar biblioteca",async () => { await reload(); setLoadError(""); })}>Reintentar</button></div> : rows.length === 0 ? (
         <Empty
           icon={<IconCubes width={22} height={22} />}
           title="Tu biblioteca está vacía"
@@ -137,15 +147,15 @@ export function InstancesPage() {
         />
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-          {rows.map((i, idx) => (
+          {!visible.length && <Empty title="Sin coincidencias" action={<button className="btn" onClick={() => { setQuery(""); setLoader(""); }}>Quitar filtros</button>}/>}
+          {visible.map((i, idx) => (
             <motion.div
               key={i.id}
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.32, delay: idx * 0.04 }}
+              transition={{ duration: 0.32, delay: Math.min(idx,5) * 0.035 }}
               className="group glass relative overflow-hidden p-5 transition-all duration-300 ease-soft hover:-translate-y-0.5 hover:border-gold-500/30 hover:shadow-floating"
             >
-              <div className="pointer-events-none absolute -right-12 -top-12 h-32 w-32 rounded-full bg-gold-500/10 opacity-0 blur-3xl transition-opacity duration-300 group-hover:opacity-100" />
 
               <div className="flex items-start gap-3">
                 <Avatar name={i.name} size={46} />
@@ -220,7 +230,7 @@ export function InstancesPage() {
                           "1",
                         );
                         const idx = Number(pick) - 1;
-                        if (!Number.isFinite(idx) || idx < 0 || idx >= backups.length) {
+                        if (!Number.isInteger(idx) || idx < 0 || idx >= backups.length) {
                           return;
                         }
                         if (
@@ -246,24 +256,7 @@ export function InstancesPage() {
                   className="btn-ghost text-[11.5px]"
                   onClick={() =>
                     tap("Duplicar instancia", async () => {
-                      const base = await instanceGet(i.id);
-                      if (!base) return;
-                      const nid = crypto.randomUUID();
-                      const copy: InstanceRow = {
-                        ...base,
-                        id: nid,
-                        name: `${base.name} (copia)`,
-                        createdAt: new Date().toISOString(),
-                        updatedAt: new Date().toISOString(),
-                      };
-                      const { prepareNewInstancePaths } = await import(
-                        "../services/launchInstance"
-                      );
-                      const prep = await prepareNewInstancePaths(
-                        (await appPaths()).launcherRoot,
-                        copy,
-                      );
-                      await instanceSave(prep);
+                      await instanceDuplicate(i.id);
                       await reload();
                     })
                   }

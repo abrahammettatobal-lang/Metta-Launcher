@@ -86,8 +86,10 @@ const TTL_MS = 10 * 60 * 1000;
 
 export async function fetchMojangNews(): Promise<MojangNewsEntry[]> {
   if (_cache && Date.now() - _cache.at < TTL_MS) return _cache.data;
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), 8000);
   try {
-    const res = await fetch(FEED_URL, { cache: "no-store" });
+    const res = await fetch(FEED_URL, { cache: "no-store", signal: controller.signal });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const json = (await res.json()) as RawFeed;
     const entries = (json.entries ?? [])
@@ -109,6 +111,8 @@ export async function fetchMojangNews(): Promise<MojangNewsEntry[]> {
   } catch (err) {
     console.warn("[mojang-news] fallback", err);
     return [];
+  } finally {
+    window.clearTimeout(timer);
   }
 }
 

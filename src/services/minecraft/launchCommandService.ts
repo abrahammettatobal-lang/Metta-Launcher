@@ -17,10 +17,17 @@ export interface LaunchReplacements {
   launcher_name: string;
   launcher_version: string;
   classpath: string;
+  /** Set automatically in buildLaunchCommand if omitted. */
+  classpath_separator?: string;
   library_directory: string;
   natives_directory: string;
   primary_jar: string;
   clientid: string;
+  /**
+   * Vanilla Minecraft version (1.21.1). Forge/NeoForge JSON ignoreList uses
+   * `${version_name}.jar`; Prism sets version_name to this so 1.21.1.jar is ignored.
+   */
+  minecraft_version?: string;
 }
 
 type ArgRule = {
@@ -88,6 +95,152 @@ function normalizeJvmFlag(s: string): string {
   return trimmed;
 }
 
+function jarFileName(p: string): string {
+  const n = p.replace(/\\/g, "/").split("/").pop() ?? "";
+  return n.toLowerCase();
+}
+
+function stripClasspathFlags(args: string[]): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a === "-cp" || a === "-classpath") {
+      i += 1;
+      continue;
+    }
+    out.push(a);
+  }
+  return out;
+}
+
+function modulePathJarNames(jvmArgs: string[], cpSep: string): Set<string> {
+  const names = new Set<string>();
+  for (let i = 0; i < jvmArgs.length; i++) {
+    if (jvmArgs[i] !== "-p" && jvmArgs[i] !== "--module-path") continue;
+    const value = jvmArgs[i + 1];
+    if (!value) continue;
+    for (const part of value.split(cpSep)) {
+      const name = jarFileName(part);
+      if (name) names.add(name);
+    }
+  }
+  return names;
+}
+
+/** Vanilla client names like 1.21.1.jar become automatic modules `_1._21._1`. */
+function isVanillaClientJarName(name: string): boolean {
+  return /^\d+(?:\.\d+)+(?:-rc\d+|-pre\d+)?\.jar$/i.test(name);
+}
+
+/** Keep the Minecraft client jar off JPMS; Forge/NeoForge create module `minecraft` themselves. */
+function removeVersionJarFromModulePath(
+  jvmArgs: string[],
+  cpSep: string,
+  versionJar: string,
+): string[] {
+  const versionName = jarFileName(versionJar);
+  const out = [...jvmArgs];
+  for (let i = 0; i < out.length; i++) {
+    if (out[i] !== "-p" && out[i] !== "--module-path") continue;
+    const value = out[i + 1];
+    if (!value) continue;
+    out[i + 1] = value
+      .split(cpSep)
+      .filter((part) => {
+        const name = jarFileName(part);
+        if (!name) return false;
+        if (versionName && name === versionName) return false;
+        if (isVanillaClientJarName(name)) return false;
+        return true;
+      })
+      .join(cpSep);
+  }
+  return out;
+}
+
+function classpathWithoutModuleJars(
+  classpath: string,
+  cpSep: string,
+  moduleJarNames: Set<string>,
+  versionJar: string,
+): string {
+  const parts = classpath.split(cpSep).filter(Boolean);
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const part of parts) {
+    const name = jarFileName(part);
+    if (moduleJarNames.has(name)) continue;
+    const key = part.replace(/\\/g, "/").toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(part);
+  }
+  const versionKey = versionJar.replace(/\\/g, "/").toLowerCase();
+  if (versionJar && !seen.has(versionKey)) {
+    out.push(versionJar);
+  }
+  return out.join(cpSep);
+}
+
+/**
+ * BootstrapLauncher 2.0.2 ignores classpath jars whose *filename* startsWith an
+ * ignoreList entry. NeoForge ships `-DignoreList=client-extra,${version_name}.jar`.
+ * Metta used to set version_name to `neoforge-21.1.265`, so ignoreList missed
+ * `1.21.1.jar` → automatic module `_1._21._1` split-packages with `minecraft`.
+ * Prism sets --version / version_name to the MC version so the JSON already matches.
+ */
+function collectIgnoreJarNames(
+  versionJar: string,
+  classpath: string,
+  cpSep: string,
+  minecraftVersion?: string,
+): string[] {
+  const names: string[] = [];
+  const seen = new Set<string>();
+  const add = (raw: string) => {
+    const n = raw.trim();
+    if (!n) return;
+    const key = n.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    names.push(n);
+  };
+  add(jarFileName(versionJar));
+  const mc = minecraftVersion?.replace(/[/\\]/g, "").trim();
+  if (mc) add(`${mc}.jar`);
+  for (const part of classpath.split(cpSep)) {
+    const n = jarFileName(part);
+    if (isVanillaClientJarName(n)) add(n);
+  }
+  return names;
+}
+
+function appendJarsToIgnoreList(jvmArgs: string[], extraNames: string[]): string[] {
+  if (!extraNames.length) return jvmArgs;
+  let found = false;
+  const mapped = jvmArgs.map((arg) => {
+    if (!arg.startsWith("-DignoreList=")) return arg;
+    found = true;
+    const current = arg.slice("-DignoreList=".length);
+    const parts = current.split(",").map((s) => s.trim()).filter(Boolean);
+    const lower = new Set(parts.map((p) => p.toLowerCase()));
+    for (const name of extraNames) {
+      if (!lower.has(name.toLowerCase())) {
+        parts.push(name);
+        lower.add(name.toLowerCase());
+      }
+    }
+    return `-DignoreList=${parts.join(",")}`;
+  });
+  if (found) return mapped;
+  const usesForgeModules = jvmArgs.some((a) => a === "-p" || a === "--module-path");
+  if (!usesForgeModules) return jvmArgs;
+  return [
+    `-DignoreList=bootstraplauncher,securejarhandler,asm,client-extra,forge-,${extraNames.join(",")}`,
+    ...jvmArgs,
+  ];
+}
+
 function substitute(s: string, rep: LaunchReplacements): string {
   return s
     .replaceAll("${auth_player_name}", rep.auth_player_name)
@@ -104,6 +257,7 @@ function substitute(s: string, rep: LaunchReplacements): string {
     .replaceAll("${launcher_name}", rep.launcher_name)
     .replaceAll("${launcher_version}", rep.launcher_version)
     .replaceAll("${classpath}", rep.classpath)
+    .replaceAll("${classpath_separator}", rep.classpath_separator ?? ";")
     .replaceAll("${library_directory}", rep.library_directory)
     .replaceAll("${natives_directory}", rep.natives_directory)
     .replaceAll("${primary_jar}", rep.primary_jar)
@@ -120,12 +274,16 @@ export function buildLaunchCommand(
   maxMb: number,
 ): string[] {
   const cpSep = os === "windows" ? ";" : ":";
-  const rep2 = { ...rep, classpath: rep.classpath.split(cpSep).filter(Boolean).join(cpSep) };
+  const rep2 = {
+    ...rep,
+    classpath: rep.classpath.split(cpSep).filter(Boolean).join(cpSep),
+    classpath_separator: cpSep,
+  };
   const jvm: string[] = [];
   jvm.push(`-Xms${minMb}M`);
   jvm.push(`-Xmx${maxMb}M`);
 
-  const jvmPieces =
+  let jvmPieces =
     v.arguments?.jvm && v.arguments.jvm.length > 0
       ? flatten(v.arguments.jvm as ArgPiece[], os, { has_custom_resolution: false }).map((part) =>
           normalizeJvmFlag(substitute(part, rep2)),
@@ -134,14 +292,33 @@ export function buildLaunchCommand(
 
   jvm.push(...sanitizeExtraJvm(extraJvm, jvmPieces));
 
+  /*
+   * Prism/CurseForge: Forge's `-p` is only bootstrap/ModLauncher jars.
+   * The Minecraft version JAR (1.20.1.jar) stays on `-cp` so Java 17+ does
+   * not turn it into an automatic module (split package vs module `minecraft`,
+   * which breaks Sinytra Connector). Jars already on `-p` must not also be on `-cp`.
+   */
+  jvmPieces = stripClasspathFlags(jvmPieces);
+  jvmPieces = removeVersionJarFromModulePath(jvmPieces, cpSep, rep.primary_jar);
+  const moduleJars = modulePathJarNames(jvmPieces, cpSep);
+  const classpath = classpathWithoutModuleJars(
+    rep2.classpath,
+    cpSep,
+    moduleJars,
+    rep.primary_jar,
+  );
+  jvmPieces = appendJarsToIgnoreList(
+    jvmPieces,
+    collectIgnoreJarNames(rep.primary_jar, classpath, cpSep, rep.minecraft_version),
+  );
+
   if (jvmPieces.length > 0) {
     jvm.push(...jvmPieces);
-    jvm.push(v.mainClass);
   } else {
     jvm.push(`-Djava.library.path=${rep.natives_directory}`);
-    jvm.push("-cp", rep2.classpath);
-    jvm.push(v.mainClass);
   }
+  jvm.push("-cp", classpath);
+  jvm.push(v.mainClass);
   const game: string[] = [];
   if (v.minecraftArguments) {
     game.push(

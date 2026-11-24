@@ -25,6 +25,7 @@ export function HistoryPage() {
     void reload();
   }, [reload]);
 
+  const finishedCount = rows.filter(r => r.finishedAt).length;
   const successCount = rows.filter((r) => r.success).length;
 
   return (
@@ -46,8 +47,8 @@ export function HistoryPage() {
         <Stat
           label="Tasa éxito"
           value={
-            rows.length
-              ? `${Math.round((successCount / rows.length) * 100)}%`
+            finishedCount
+              ? `${Math.round((successCount / finishedCount) * 100)}%`
               : "—"
           }
         />
@@ -100,12 +101,12 @@ export function HistoryPage() {
                   <td>
                     <span
                       className={
-                        r.success
+                        (!r.finishedAt || r.success)
                           ? "pill-gold text-[10px]"
                           : "rounded-md border border-red-500/30 bg-red-500/10 px-2 py-0.5 text-[10px] font-semibold text-red-300"
                       }
                     >
-                      {r.success
+                      {!r.finishedAt ? "En curso" : r.success
                         ? "OK"
                         : r.exitCode != null
                           ? `Salida ${r.exitCode}`

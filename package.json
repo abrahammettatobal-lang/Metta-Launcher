@@ -8,8 +8,8 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "tauri:dev": "bash -lc 'source \"$HOME/.cargo/env\" 2>/dev/null; exec tauri dev'",
-    "tauri:build": "bash -lc 'source \"$HOME/.cargo/env\" 2>/dev/null; exec tauri build'",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build",
     "lint": "tsc -b --noEmit"
   },
   "dependencies": {

@@ -1,5 +1,15 @@
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
+/** Dispose a native listener even if registration finishes after unmount. */
+export function onNativeEvent(registration: Promise<UnlistenFn>): () => void {
+  let disposed = false;
+  let stop: UnlistenFn | undefined;
+  void registration.then(fn => {
+    if (disposed) fn(); else stop = fn;
+  }).catch(error => console.warn("[Metta] Registro de evento", error));
+  return () => { disposed = true; stop?.(); };
+}
+
 export interface DownloadProgress {
   id: string;
   url: string;

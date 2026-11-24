@@ -1,171 +1,103 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { motion, AnimatePresence } from "framer-motion";
 import {
   accountAddOffline,
+  accountsList,
   appPaths,
+  javaDetect,
   launcherSetRoot,
-  settingGet,
   settingSet,
 } from "../services/bridge";
-import { javaDetect } from "../services/bridge";
+import { Topbar } from "../ui/Topbar";
 import { Card } from "../ui/Card";
 import { Field } from "../ui/Field";
 import { tap, toastOk } from "../utils/tap";
 
-export function OnboardingGate({ children }: { children: ReactNode }) {
-  const [ready, setReady] = useState(false);
-  const [show, setShow] = useState(false);
-
-  useEffect(() => {
-    void (async () => {
-      try {
-        const done = await settingGet("onboardingComplete");
-        setShow(done !== "true");
-      } catch {
-        setShow(true);
-      } finally {
-        setReady(true);
-      }
-    })();
-  }, []);
-
-  if (!ready) {
-    return (
-      <div className="flex h-full min-h-[400px] flex-col items-center justify-center gap-3">
-        <div className="h-8 w-8 animate-pulse rounded-xl border border-gold-500/30 bg-gold-haze/20" />
-        <p className="text-[13px] text-ink-muted">Cargando Metta Launcher…</p>
-      </div>
-    );
-  }
-  if (!show) return <>{children}</>;
-
-  return (
-    <>
-      {children}
-      <OnboardingModal onDone={() => setShow(false)} />
-    </>
-  );
-}
-
-function OnboardingModal({ onDone }: { onDone: () => void }) {
+export function SetupPage() {
   const nav = useNavigate();
-  const [step, setStep] = useState(0);
   const [root, setRoot] = useState("");
-  const [offlineName, setOfflineName] = useState("");
-  const [javaInfo, setJavaInfo] = useState("");
-
+  const [original, setOriginal] = useState("");
+  const [name, setName] = useState("");
+  const [java, setJava] = useState("Buscando Java…");
+  const [saving, setSaving] = useState(false);
+  const locked = useRef(false);
   useEffect(() => {
-    void appPaths().then((p) => setRoot(p.launcherRoot));
-    void javaDetect().then((j) => {
-      if (j.length) setJavaInfo(`${j[0].version ?? "?"} · ${j[0].path}`);
-      else setJavaInfo("No detectado — se descargará al lanzar");
+    void tap("Leer carpeta", async () => {
+      const p = await appPaths();
+      setRoot(p.launcherRoot);
+      setOriginal(p.launcherRoot);
     });
+    void javaDetect()
+      .then((rows) => setJava(rows[0]?.version ?? "Se instalará al jugar."))
+      .catch(() => setJava("No se pudo detectar Java."));
   }, []);
-
-  const finish = () =>
-    tap("Finalizar onboarding", async () => {
-      if (root.trim()) await launcherSetRoot(root.trim());
-      await settingSet("onboardingComplete", "true");
-      toastOk("Metta Launcher listo");
-      onDone();
-      nav("/");
-    });
-
-  const steps = [
-    {
-      title: "Bienvenido a Metta",
-      body: "Configura tu launcher en unos pasos. Todo se guarda localmente.",
-    },
-    {
-      title: "Carpeta del launcher",
-      body: "Aquí se instalarán versiones, assets e instancias.",
-    },
-    {
-      title: "Java",
-      body: javaInfo || "Detectando…",
-    },
-    {
-      title: "Tu perfil",
-      body: "Puedes usar Microsoft después en Cuentas. Por ahora, un nombre local.",
-    },
-  ];
-
+  const finish = async () => {
+    if (locked.current) return;
+    locked.current = true;
+    setSaving(true);
+    try {
+      await tap("Configurar launcher", async () => {
+        if (root.trim() && root.trim() !== original)
+          await launcherSetRoot(root.trim());
+        if (name.trim()) {
+          const accounts = await accountsList();
+          if (
+            !accounts.some(
+              (a) => a.kind === "offline" && a.username === name.trim(),
+            )
+          )
+            await accountAddOffline(name.trim());
+          window.dispatchEvent(new Event("metta-accounts-changed"));
+        }
+        await settingSet("onboardingComplete", "true");
+        toastOk("Configuración guardada");
+        nav("/");
+      });
+    } finally {
+      locked.current = false;
+      setSaving(false);
+    }
+  };
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-canvas-deep/80 p-6 backdrop-blur-md">
-      <AnimatePresence mode="wait">
-        <motion.div
-          key={step}
-          initial={{ opacity: 0, y: 16 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: -8 }}
-          className="w-full max-w-lg"
+    <div>
+      <Topbar
+        eyebrow="Perfiles"
+        title="Configuración inicial"
+        subtitle="Elige la carpeta del juego y, si quieres, crea un perfil local."
+      />
+      <Card className="max-w-xl">
+        <form
+          className="space-y-5"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void finish();
+          }}
         >
-          <Card title={steps[step].title}>
-            <p className="text-[13px] leading-relaxed text-ink-muted">
-              {steps[step].body}
-            </p>
-
-            {step === 1 && (
-              <Field
-                className="mt-4"
-                label="Ruta"
-                value={root}
-                onChange={(e) => setRoot(e.target.value)}
-              />
-            )}
-
-            {step === 3 && (
-              <Field
-                className="mt-4"
-                label="Nombre de jugador local"
-                value={offlineName}
-                onChange={(e) => setOfflineName(e.target.value)}
-              />
-            )}
-
-            <div className="mt-6 flex items-center justify-between gap-3">
-              <div className="text-[11px] text-ink-faint">
-                Paso {step + 1} de {steps.length}
-              </div>
-              <div className="flex gap-2">
-                {step > 0 && (
-                  <button
-                    type="button"
-                    className="btn"
-                    onClick={() => setStep((s) => s - 1)}
-                  >
-                    Atrás
-                  </button>
-                )}
-                {step < steps.length - 1 ? (
-                  <button
-                    type="button"
-                    className="btn-gold"
-                    onClick={() => setStep((s) => s + 1)}
-                  >
-                    Siguiente
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    className="btn-gold"
-                    disabled={!offlineName.trim()}
-                    onClick={() =>
-                      tap("Crear perfil", async () => {
-                        await accountAddOffline(offlineName.trim());
-                        await finish();
-                      })
-                    }
-                  >
-                    Empezar
-                  </button>
-                )}
-              </div>
-            </div>
-          </Card>
-        </motion.div>
-      </AnimatePresence>
+          <Field
+            label="Carpeta del launcher"
+            value={root}
+            onChange={(e) => setRoot(e.target.value)}
+            required
+          />
+          <Field
+            label="Jugador local (opcional)"
+            value={name}
+            maxLength={64}
+            onChange={(e) => setName(e.target.value)}
+          />
+          <div>
+            <span className="field-label">Java detectado</span>
+            <p className="text-sm text-ink-soft">{java}</p>
+          </div>
+          <button
+            className="btn-gold"
+            type="submit"
+            disabled={saving || !root.trim()}
+          >
+            {saving ? "Guardando…" : "Guardar configuración"}
+          </button>
+        </form>
+      </Card>
     </div>
   );
 }

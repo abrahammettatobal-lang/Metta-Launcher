@@ -20,7 +20,7 @@ export function RecorderOverlay({ settings, status }: RecorderOverlayProps) {
   const now = new Date();
 
   return (
-    <div className="pointer-events-none fixed bottom-6 right-6 z-[9999] rounded-xl border border-line-gold/40 bg-black/70 px-4 py-3 backdrop-blur-md">
+    <div className="pointer-events-none fixed bottom-6 right-6 z-[9999] rounded-xl border border-line-gold/40 bg-black/70 px-4 py-3">
       <div className="flex flex-col gap-1 text-[11px] text-ink">
         {settings.overlayLogo && (
           <div className="font-display text-[10px] font-bold uppercase tracking-[0.25em] text-gold-300">

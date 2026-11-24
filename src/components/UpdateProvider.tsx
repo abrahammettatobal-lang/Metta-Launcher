@@ -48,6 +48,7 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
   const [latestVersion, setLatestVersion] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const busy = useRef(false);
+  const checking = useRef(false);
 
   const installNow = useCallback(
     async (update: NonNullable<AppUpdateStatus["native"]>) => {
@@ -69,48 +70,37 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
   );
 
   const runCheck = useCallback(
-    async (opts?: { forceInstall?: boolean }) => {
-      if (busy.current) return null;
-
-      const autoCheck = (await settingGet("autoCheckUpdates")) !== "false";
-      if (!opts?.forceInstall && !autoCheck) return null;
-
-      setPhase("checking");
+    async (manual = false) => {
+      if (busy.current || checking.current) return null;
+      checking.current = true;
       try {
+        if (!manual && (await settingGet("autoCheckUpdates")) === "false") return null;
+        setPhase("checking");
         const status = await checkAppUpdate();
-        if (!status.updateAvailable || !status.native) {
-          setPhase("idle");
-          return status;
-        }
-
         setLatestVersion(status.latestVersion);
-        const autoInstall =
-          opts?.forceInstall ||
-          (await settingGet("autoInstallUpdates")) === "true";
-
-        if (autoInstall) {
+        if (status.native && (await settingGet("autoInstallUpdates")) === "true") {
           await installNow(status.native);
         } else {
           setPhase("idle");
         }
-
         return status;
       } catch (e) {
         setError(String(e));
-        setPhase("error");
-        busy.current = false;
+        setPhase(manual ? "error" : "idle");
         return null;
+      } finally {
+        checking.current = false;
       }
     },
     [installNow],
   );
 
   const checkNow = useCallback(async () => {
-    busy.current = false;
-    return runCheck({ forceInstall: false });
+    return runCheck(true);
   }, [runCheck]);
 
   useEffect(() => {
+    if (!("__TAURI_INTERNALS__" in window)) return;
     const bootTimer = window.setTimeout(() => void runCheck(), 3000);
     const timer = window.setInterval(() => void runCheck(), CHECK_INTERVAL_MS);
     const onFocus = () => void runCheck();
@@ -145,7 +135,7 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[200] flex items-center justify-center bg-canvas-deep/88 backdrop-blur-md"
+            className="fixed inset-0 z-[200] flex items-center justify-center bg-canvas-deep/88"
           >
             <motion.div
               initial={{ opacity: 0, y: 12, scale: 0.98 }}

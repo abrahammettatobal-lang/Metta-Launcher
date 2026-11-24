@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
@@ -75,6 +76,7 @@ export function AccountsPage() {
   const load = useCallback(async () => {
     const [accs, ins] = await Promise.all([accountsList(), instancesList()]);
     setRows(accs);
+    window.dispatchEvent(new Event("metta-accounts-changed"));
     setInstances(ins);
     setSkinInstance((prev) =>
       prev && ins.some((i) => i.id === prev) ? prev : ins[0]?.id ?? "",
@@ -90,6 +92,7 @@ export function AccountsPage() {
 
   useEffect(() => {
     if (!trimmedName) {
+      setResolving(false);
       setResolved(null);
       setResolveError(null);
       return;
@@ -220,14 +223,14 @@ export function AccountsPage() {
     <div className="space-y-6">
       <Topbar
         eyebrow="Cuentas"
-        title="Identidad de juego"
+        title="Perfiles de juego"
+        actions={<Link to="/setup" className="btn">Configuración inicial</Link>}
         subtitle="Microsoft para servidores Premium o perfil local para modo offline."
       />
 
       {activeAccount && (
         <Card padding="none" className="overflow-hidden">
           <div className="relative flex flex-col gap-4 p-6 sm:flex-row sm:items-center">
-            <div className="pointer-events-none absolute -right-16 -top-16 h-48 w-48 rounded-full bg-gold-500/12 blur-3xl" />
             <Avatar
               name={activeAccount.username}
               src={

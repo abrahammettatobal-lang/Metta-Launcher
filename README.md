@@ -62,6 +62,8 @@ The launcher root defaults to `%USERPROFILE%\MettaLauncher` (Windows) or the pla
 
 Instances live under `instances/<id>/` with their own `mods`, `config`, `saves`, `resourcepacks`, `shaderpacks`, and `natives`. Shared game files are under `shared/` (libraries, assets, version JSON, Forge/NeoForge install runs).
 
+An optional absolute `METTA_PROFILE_DIR` selects an independent database and defaults its game files to `game/` inside that directory. Microsoft credentials continue to use the operating system credential manager.
+
 ## Accounts
 
 Microsoft login uses the official device-code flow; tokens are stored in the system credential manager, not in the database. Offline accounts are local-only and use the standard offline UUID scheme.

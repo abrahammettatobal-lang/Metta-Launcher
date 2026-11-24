@@ -45,5 +45,5 @@ export function hostArchLabel(arch: string): string {
 
 /** Warm platform cache during app boot (macOS arch + Java downloads). */
 export function preloadHostPlatform(): void {
-  void getHostPlatform();
+  if ("__TAURI_INTERNALS__" in window) void getHostPlatform().catch(console.warn);
 }

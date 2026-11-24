@@ -17,7 +17,6 @@ export function Empty({ icon, title, description, action, className }: EmptyProp
         className,
       )}
     >
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_60%_50%_at_50%_0%,rgba(201,162,39,0.08),transparent_70%)]" />
       {icon && (
         <div className="relative mb-4 flex h-14 w-14 items-center justify-center rounded-2xl border border-line-gold/25 bg-canvas-card/80 text-gold-300 shadow-plate">
           {icon}

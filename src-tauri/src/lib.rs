@@ -48,6 +48,11 @@ pub struct AppPaths {
   pub launcher_root: String,
 }
 
+fn profile_data_dir(app: &AppHandle) -> Result<PathBuf, String> {
+  if let Some(dir) = paths::profile_dir() { return Ok(dir); }
+  app.path().app_data_dir().map_err(|e| e.to_string())
+}
+
 fn launcher_root_path(db: &Db) -> PathBuf {
   let raw = db
     .setting_get("launcherRoot")
@@ -142,7 +147,7 @@ fn du_dir(path: &Path) -> Result<u64, String> {
 
 #[tauri::command]
 fn app_paths(app: AppHandle, state: State<'_, AppState>) -> Result<AppPaths, String> {
-  let app_data = app.path().app_data_dir().map_err(|e| e.to_string())?;
+  let app_data = profile_data_dir(&app)?;
   let db_path = app_data.join("metta.db");
   let root = launcher_root_path(&state.db);
   let root_display = dunce::simplified(&root).to_string_lossy().to_string();
@@ -218,6 +223,13 @@ fn instance_get(state: State<'_, AppState>, id: String) -> Result<Option<Instanc
 fn instance_save(state: State<'_, AppState>, row: InstanceRow) -> Result<(), String> {
   db::instance_upsert(&state.db, &row)?;
   instances::write_instance_meta(&state.db, &row)
+}
+
+#[tauri::command]
+async fn instance_duplicate(state: State<'_, AppState>, id: String) -> Result<(), String> {
+  let db = state.db.clone();
+  tauri::async_runtime::spawn_blocking(move || instances::duplicate_instance(&db, &id))
+    .await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -756,12 +768,11 @@ fn spawn_java_game(
   let root = launcher_root_path(&state.db);
   let java = java::resolve_java_executable(&root, &req.java_path)?;
   let history_id = if let Some(ref id) = req.instance_id {
-    let _ = state.db.instance_touch_last_played(id);
     state.db.launch_history_insert_start(id).ok()
   } else {
     None
   };
-  game::spawn_game_process(
+  let result = game::spawn_game_process(
     app,
     state.db.clone(),
     history_id,
@@ -770,7 +781,13 @@ fn spawn_java_game(
     req.cwd,
     req.env,
     req.instance_id.clone().unwrap_or_default(),
-  )
+  );
+  if result.is_ok() {
+    if let Some(id) = req.instance_id { let _ = state.db.instance_touch_last_played(&id); }
+  } else if let Some(id) = history_id {
+    let _ = state.db.launch_history_finish(id, None, false);
+  }
+  result
 }
 
 #[tauri::command]
@@ -797,8 +814,7 @@ pub fn run() {
     .plugin(tauri_plugin_updater::Builder::new().build())
     .plugin(tauri_plugin_process::init())
     .setup(|app| {
-      let resolver = app.path();
-      let app_data = resolver.app_data_dir().expect("app data dir");
+      let app_data = profile_data_dir(app.handle()).map_err(std::io::Error::other)?;
       std::fs::create_dir_all(&app_data).expect("create app data");
       let db_path = app_data.join("metta.db");
       let db = Arc::new(Db::open(&db_path).expect("db open"));
@@ -834,6 +850,7 @@ pub fn run() {
       instance_get,
       instance_save,
       instance_delete,
+      instance_duplicate,
       instances_sync,
       accounts_list,
       account_delete,
@@ -923,7 +940,7 @@ pub fn run() {
 
 #[tauri::command]
 fn system_diagnose(app: AppHandle, state: State<'_, AppState>) -> Result<system::SystemDiagnostic, String> {
-  let app_data = app.path().app_data_dir().map_err(|e| e.to_string())?;
+  let app_data = profile_data_dir(&app)?;
   Ok(system::collect_diagnostics(&state.db, &app_data))
 }
 
